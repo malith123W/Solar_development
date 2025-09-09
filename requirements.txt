@@ -3,4 +3,8 @@ pandas==2.2.3
 plotly==5.17.0
 kaleido==0.2.1
 Werkzeug==2.3.7
-numpy==1.24.3
+# Use NumPy compatible with Python 3.13
+numpy>=2.0.0
+# Ensure build backends are available
+setuptools>=68.0.0
+wheel>=0.41.0
