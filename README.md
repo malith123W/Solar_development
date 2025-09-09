@@ -8,6 +8,7 @@ A modern web application for analyzing CSV electrical data with interactive visu
 - **Interactive Graphs**: Time vs. voltage/current/power-factor plots using Plotly
 - **Parameter Selection**: Voltage, Current, Power Factor
 - **Time Filtering**: Pick a start/end datetime to filter graphs and stats
+- **NMD Analysis**: Upload NMD CSV, select CUSTOMER_REF, view 3-phase voltages
 - **Real-time Updates**: Update graphs dynamically based on phase selection
 - **Data Statistics**: View min, max, average, and standard deviation for each phase
 - **Export Options**: Download graphs as PNG or JPEG images
@@ -111,6 +112,13 @@ time,Phase_A,Phase_B,Phase_C
 - Use the phase checkboxes to show/hide specific phases
 - Hover over the graph to see exact values
 
+### 2b. NMD Analysis
+- Click "Go to NMD Analysis" or open `/nmd`
+- Upload an NMD CSV containing `DATE`, `TIME`, `CUSTOMER_REF`, and three voltage columns
+- Select a `CUSTOMER_REF` from the dropdown to filter data for that customer
+- Optionally set a start/end datetime and click "Update Graph"
+- The app renders an interactive three-phase voltage vs time chart
+
 ### 3. Customize Display
 - Select which phases to display using the checkboxes
 - Click "Update Graph" to apply changes
@@ -141,6 +149,7 @@ electrical-data-analyzer/
 ├── requirements.txt            # Python dependencies
 ├── templates/
 │   └── index.html             # Frontend HTML template
+│   └── nmd_analysis.html      # NMD analysis page (upload + customer graph)
 ├── uploads/                   # Upload directory (auto-created)
 └── README.md                  # This file
 ```
