@@ -440,22 +440,25 @@
                 <h3>🎛️ Graph Controls</h3>
                 <div class="controls-grid">
                     <div class="control-group">
-                        <label>Select Phases to Display:</label>
-                        <div class="phase-selector">
-                            <label class="phase-checkbox">
-                                <input type="checkbox" value="PHASE_A_INST" checked> Phase A
-                            </label>
-                            <label class="phase-checkbox">
-                                <input type="checkbox" value="PHASE_B_" checked> Phase B
-                            </label>
-                            <label class="phase-checkbox">
-                                <input type="checkbox" value="PHASE_C_" checked> Phase C
-                            </label>
+                        <label for="parameterSelect">Parameter</label>
+                        <select id="parameterSelect" class="form-select" style="padding: 12px; border-radius: 10px; border: 1px solid #ced4da;">
+                            <option value="voltage">Voltage</option>
+                            <option value="current">Current</option>
+                            <option value="power_factor">Power Factor</option>
+                        </select>
+                    </div>
+
+                    <div class="control-group">
+                        <label>Time Range</label>
+                        <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                            <input type="datetime-local" id="startDate" style="padding: 12px; border-radius: 10px; border: 1px solid #ced4da;" />
+                            <input type="datetime-local" id="endDate" style="padding: 12px; border-radius: 10px; border: 1px solid #ced4da;" />
+                            <button class="btn btn-secondary" id="clearDatesBtn" type="button">Clear</button>
                         </div>
                     </div>
-                    
+
                     <div class="control-group">
-                        <label>Actions:</label>
+                        <label>Actions</label>
                         <div style="display: flex; gap: 10px;">
                             <button class="btn btn-primary" id="updateGraphBtn">Update Graph</button>
                             <button class="btn btn-success" id="downloadPngBtn">Download PNG</button>
@@ -482,6 +485,7 @@
     <script>
         let currentSessionId = 'session_' + Date.now();
         let currentData = null;
+        let currentParameter = 'voltage';
         
         // Check if Plotly is loaded when page loads
         document.addEventListener('DOMContentLoaded', function() {
@@ -539,15 +543,21 @@
             uploadFile(file);
         });
 
-        // Phase selection change
-        document.querySelectorAll('.phase-checkbox input').forEach(checkbox => {
-            checkbox.addEventListener('change', function() {
-                updateGraph();
-            });
-        });
-
         // Update graph button
         document.getElementById('updateGraphBtn').addEventListener('click', updateGraph);
+
+        // Parameter change
+        document.getElementById('parameterSelect').addEventListener('change', function() {
+            currentParameter = this.value;
+        });
+
+        // Clear dates
+        document.getElementById('clearDatesBtn').addEventListener('click', function() {
+            if (currentData && currentData.time_range) {
+                document.getElementById('startDate').value = currentData.time_range.min_datetime;
+                document.getElementById('endDate').value = currentData.time_range.max_datetime;
+            }
+        });
 
         // Download buttons
         document.getElementById('downloadPngBtn').addEventListener('click', () => downloadGraph('png'));
@@ -601,10 +611,22 @@
                 showLoading(false);
                 if (data.success) {
                     currentData = data;
-                    showMessage(`File uploaded successfully! Detected format: ${data.format_type}`, 'success');
+                    currentParameter = data.initial_parameter || 'voltage';
+                    const paramSelect = document.getElementById('parameterSelect');
+                    if (paramSelect) paramSelect.value = currentParameter;
+                    if (data.time_range) {
+                        const { min_datetime, max_datetime } = data.time_range;
+                        const startEl = document.getElementById('startDate');
+                        const endEl = document.getElementById('endDate');
+                        if (startEl && endEl) {
+                            startEl.value = min_datetime;
+                            endEl.value = max_datetime;
+                        }
+                    }
+                    showMessage(`File uploaded successfully!`, 'success');
                     displayFileDetails(data);
                     displayGraph(data.graph_data);
-                    displayStatistics(data.statistics);
+                    displayParameterStatistics(data.statistics, currentParameter);
                     showControls();
                 } else {
                     showMessage(data.error, 'error');
@@ -617,13 +639,8 @@
         }
 
         function updateGraph() {
-            const selectedPhases = Array.from(document.querySelectorAll('.phase-checkbox input:checked'))
-                .map(cb => cb.value);
-
-            if (selectedPhases.length === 0) {
-                showMessage('Please select at least one phase.', 'error');
-                return;
-            }
+            const start = document.getElementById('startDate').value;
+            const end = document.getElementById('endDate').value;
 
             fetch('/generate_graph', {
                 method: 'POST',
@@ -632,13 +649,18 @@
                 },
                 body: JSON.stringify({
                     session_id: currentSessionId,
-                    phases: selectedPhases
+                    parameter_type: currentParameter,
+                    start_date: start || null,
+                    end_date: end || null
                 })
             })
             .then(response => response.json())
             .then(data => {
                 if (data.success) {
                     displayGraph(data.graph_data);
+                    if (data.statistics) {
+                        displayParameterStatistics({ [currentParameter]: data.statistics }, currentParameter);
+                    }
                 } else {
                     showMessage(data.error, 'error');
                 }
@@ -649,13 +671,8 @@
         }
 
         function downloadGraph(format) {
-            const selectedPhases = Array.from(document.querySelectorAll('.phase-checkbox input:checked'))
-                .map(cb => cb.value);
-
-            if (selectedPhases.length === 0) {
-                showMessage('Please select at least one phase.', 'error');
-                return;
-            }
+            const start = document.getElementById('startDate').value;
+            const end = document.getElementById('endDate').value;
 
             fetch('/download_graph', {
                 method: 'POST',
@@ -664,8 +681,10 @@
                 },
                 body: JSON.stringify({
                     session_id: currentSessionId,
-                    phases: selectedPhases,
-                    format: format
+                    parameter_type: currentParameter,
+                    format: format,
+                    start_date: start || null,
+                    end_date: end || null
                 })
             })
             .then(response => {
@@ -692,12 +711,23 @@
 
         function displayFileDetails(data) {
             const fileDetails = document.getElementById('fileDetails');
+            const di = data.data_info || {};
+            const parts = [];
+            if (di.voltage && di.voltage.available) {
+                parts.push(`Voltage (${di.voltage.phase_count === 3 ? '3-phase' : 'single-phase'})`);
+            }
+            if (di.current && di.current.available) {
+                parts.push(`Current (${di.current.phase_count === 3 ? '3-phase' : 'single-phase'})`);
+            }
+            if (di.power_factor && di.power_factor.available) {
+                parts.push('Power Factor');
+            }
+            const availableText = parts.length ? parts.join(', ') : 'Unknown';
             fileDetails.innerHTML = `
                 <p><strong>Filename:</strong> ${data.filename}</p>
-                <p><strong>Detected Format:</strong> ${data.format_type}</p>
+                <p><strong>Available Parameters:</strong> ${availableText}</p>
                 <p><strong>Total Rows:</strong> ${data.row_count.toLocaleString()}</p>
                 <p><strong>Columns:</strong> ${data.columns.length}</p>
-                <p><strong>Voltage Columns:</strong> ${data.columns.filter(col => col.includes('VOLTAGE') || col.includes('PHASE')).join(', ')}</p>
             `;
             document.getElementById('fileDetailsSection').style.display = 'block';
         }
@@ -738,26 +768,39 @@
         }
 
         function displayStatistics(stats) {
+            displayParameterStatistics(stats, currentParameter);
+        }
+
+        function displayParameterStatistics(allStats, parameter) {
+            const stats = allStats && allStats[parameter] ? allStats[parameter] : {};
+            const units = parameter === 'voltage' ? 'V' : parameter === 'current' ? 'A' : '';
             const statsGrid = document.getElementById('statsGrid');
             statsGrid.innerHTML = '';
 
-            Object.entries(stats).forEach(([phase, data]) => {
+            Object.entries(stats).forEach(([column, data]) => {
                 const statCard = document.createElement('div');
                 statCard.className = 'stat-card';
+                const title = column
+                    .replace('PHASE_A_INST._', 'Phase A ')
+                    .replace('PHASE_B_INST._', 'Phase B ')
+                    .replace('PHASE_C_INST._', 'Phase C ')
+                    .replace(' (V)', '')
+                    .replace(' (A)', '')
+                    .replace('POWER_FACTOR', 'Power Factor');
                 statCard.innerHTML = `
-                    <h4>${phase.replace('_', ' ').replace('PHASE A INST', 'Phase A').replace('PHASE B ', 'Phase B').replace('PHASE C ', 'Phase C')}</h4>
-                    <div class="stat-value">${data.mean.toFixed(2)}</div>
-                    <div class="stat-unit">Average (V)</div>
+                    <h4>${title}</h4>
+                    <div class="stat-value">${(data.mean ?? 0).toFixed(2)}</div>
+                    <div class="stat-unit">Average ${units}</div>
                     <div style="margin-top: 10px; font-size: 0.9rem;">
-                        <div>Min: ${data.min.toFixed(2)} V</div>
-                        <div>Max: ${data.max.toFixed(2)} V</div>
-                        <div>Std Dev: ${data.std.toFixed(2)} V</div>
+                        <div>Min: ${(data.min ?? 0).toFixed(2)} ${units}</div>
+                        <div>Max: ${(data.max ?? 0).toFixed(2)} ${units}</div>
+                        <div>Std Dev: ${(data.std ?? 0).toFixed(2)} ${units}</div>
                     </div>
                 `;
                 statsGrid.appendChild(statCard);
             });
 
-            document.getElementById('statsSection').style.display = 'block';
+            document.getElementById('statsSection').style.display = Object.keys(stats).length ? 'block' : 'none';
         }
 
         function showControls() {
