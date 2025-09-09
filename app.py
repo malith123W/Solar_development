@@ -79,7 +79,8 @@ def upload_file():
             'time_range': time_range,
             'columns': df.columns.tolist(),
             'filename': file.filename,
-            'row_count': len(df)
+            'row_count': len(df),
+            'initial_parameter': initial_parameter
         })
         
     except Exception as e:
@@ -117,11 +118,16 @@ def generate_graph():
     
     # Generate graph with selected parameter
     graph_data = generate_graph_data(df, parameter_type, data_info)
+
+    # Calculate statistics for the filtered range and selected parameter
+    stats_all = calculate_statistics(df, data_info)
+    selected_stats = stats_all.get(parameter_type, {})
     
     return jsonify({
         'success': True,
         'graph_data': graph_data,
-        'filtered_rows': len(df)
+        'filtered_rows': len(df),
+        'statistics': selected_stats
     })
 
 @app.route('/download_graph', methods=['POST'])

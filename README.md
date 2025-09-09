@@ -5,8 +5,9 @@ A modern web application for analyzing CSV electrical data with interactive visu
 ## 🚀 Features
 
 - **File Upload**: Drag & drop or click to upload CSV files (up to 100MB)
-- **Interactive Graphs**: Time vs. voltage plots using Plotly
-- **Phase Selection**: Choose which phases to display (A, B, C)
+- **Interactive Graphs**: Time vs. voltage/current/power-factor plots using Plotly
+- **Parameter Selection**: Voltage, Current, Power Factor
+- **Time Filtering**: Pick a start/end datetime to filter graphs and stats
 - **Real-time Updates**: Update graphs dynamically based on phase selection
 - **Data Statistics**: View min, max, average, and standard deviation for each phase
 - **Export Options**: Download graphs as PNG or JPEG images
