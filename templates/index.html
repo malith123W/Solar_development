@@ -1,0 +1,797 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Electrical Data Analyzer</title>
+    <!-- Load Plotly with multiple CDN fallbacks -->
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+    <script>
+        // Fallback if primary CDN fails
+        if (typeof Plotly === 'undefined') {
+            document.write('<script src="https://cdn.jsdelivr.net/npm/plotly.js-dist@2.27.0/plotly.min.js"><\/script>');
+        }
+        // Additional fallback
+        if (typeof Plotly === 'undefined') {
+            document.write('<script src="https://unpkg.com/plotly.js-dist@2.27.0/plotly.min.js"><\/script>');
+        }
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            font-weight: 300;
+        }
+
+        .header p {
+            font-size: 1.1rem;
+            opacity: 0.9;
+        }
+
+        .main-content {
+            padding: 30px;
+        }
+
+        .upload-section {
+            background: #f8f9fa;
+            border-radius: 15px;
+            padding: 30px;
+            margin-bottom: 30px;
+            text-align: center;
+            border: 2px dashed #dee2e6;
+            transition: all 0.3s ease;
+        }
+
+        .upload-section:hover {
+            border-color: #667eea;
+            background: #f0f2ff;
+        }
+
+        .file-input-wrapper {
+            position: relative;
+            display: inline-block;
+            margin: 20px 0;
+        }
+
+        .file-input {
+            position: absolute;
+            opacity: 0;
+            width: 100%;
+            height: 100%;
+            cursor: pointer;
+        }
+
+        .file-input-label {
+            display: inline-block;
+            padding: 15px 30px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 50px;
+            cursor: pointer;
+            font-size: 1.1rem;
+            font-weight: 500;
+            transition: all 0.3s ease;
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .file-input-label:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(102, 126, 234, 0.6);
+        }
+
+        .file-info {
+            margin-top: 15px;
+            font-size: 0.9rem;
+            color: #6c757d;
+        }
+
+        .format-info {
+            background: #e3f2fd;
+            border: 1px solid #2196f3;
+            border-radius: 10px;
+            padding: 20px;
+            margin: 20px 0;
+            text-align: left;
+        }
+
+        .format-info h4 {
+            color: #1976d2;
+            margin-bottom: 15px;
+            font-size: 1.1rem;
+        }
+
+        .format-info ul {
+            margin-left: 20px;
+            color: #424242;
+        }
+
+        .format-info li {
+            margin-bottom: 8px;
+        }
+
+        .file-details {
+            background: #f0f8ff;
+            border: 1px solid #87ceeb;
+            border-radius: 10px;
+            padding: 20px;
+            margin: 20px 0;
+            text-align: left;
+        }
+
+        .file-details h4 {
+            color: #4682b4;
+            margin-bottom: 15px;
+            font-size: 1.1rem;
+        }
+
+        .file-details p {
+            margin-bottom: 8px;
+            color: #2f4f4f;
+        }
+
+        .controls-section {
+            background: white;
+            border-radius: 15px;
+            padding: 25px;
+            margin-bottom: 30px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.08);
+        }
+
+        .controls-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            align-items: end;
+        }
+
+        .control-group {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .control-group label {
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: #2c3e50;
+        }
+
+        .phase-selector {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+
+        .phase-checkbox {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 15px;
+            background: #f8f9fa;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .phase-checkbox:hover {
+            background: #e9ecef;
+        }
+
+        .phase-checkbox input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            accent-color: #667eea;
+        }
+
+        .btn {
+            padding: 12px 25px;
+            border: none;
+            border-radius: 10px;
+            font-size: 1rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-decoration: none;
+            display: inline-block;
+            text-align: center;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(102, 126, 234, 0.6);
+        }
+
+        .btn-secondary {
+            background: #6c757d;
+            color: white;
+        }
+
+        .btn-secondary:hover {
+            background: #5a6268;
+        }
+
+        .btn-success {
+            background: #28a745;
+            color: white;
+        }
+
+        .btn-success:hover {
+            background: #218838;
+        }
+
+        .graph-container {
+            background: white;
+            border-radius: 15px;
+            padding: 25px;
+            margin-bottom: 30px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.08);
+        }
+
+        .graph-container h3 {
+            margin-bottom: 20px;
+            color: #2c3e50;
+            font-size: 1.5rem;
+        }
+
+        #plotly-chart {
+            width: 100%;
+            height: 600px;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+
+        .stats-section {
+            background: white;
+            border-radius: 15px;
+            padding: 25px;
+            margin-bottom: 30px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.08);
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+        }
+
+        .stat-card {
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            padding: 20px;
+            border-radius: 15px;
+            text-align: center;
+            border-left: 4px solid #667eea;
+        }
+
+        .stat-card h4 {
+            color: #2c3e50;
+            margin-bottom: 10px;
+            font-size: 1.1rem;
+        }
+
+        .stat-value {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: #667eea;
+        }
+
+        .stat-unit {
+            font-size: 0.9rem;
+            color: #6c757d;
+            margin-top: 5px;
+        }
+
+        .error-message {
+            background: #f8d7da;
+            color: #721c24;
+            padding: 15px;
+            border-radius: 10px;
+            margin: 20px 0;
+            border: 1px solid #f5c6cb;
+        }
+
+        .success-message {
+            background: #d4edda;
+            color: #155724;
+            padding: 15px;
+            border-radius: 10px;
+            margin: 20px 0;
+            border: 1px solid #c3e6cb;
+        }
+
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 20px;
+        }
+
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 15px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                margin: 10px;
+                border-radius: 15px;
+            }
+            
+            .header h1 {
+                font-size: 2rem;
+            }
+            
+            .main-content {
+                padding: 20px;
+            }
+            
+            .controls-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .phase-selector {
+                justify-content: center;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>⚡ Electrical Data Analyzer</h1>
+            <p>Upload CSV files and analyze time-series electrical data with interactive visualizations</p>
+        </div>
+
+        <div class="main-content">
+            <!-- File Upload Section -->
+            <div class="upload-section">
+                <h3>📁 Upload Your CSV File</h3>
+                <p>Select a CSV file containing electrical data with voltage measurements</p>
+                
+                <div class="format-info">
+                    <h4>📋 Supported CSV Formats:</h4>
+                    <ul>
+                        <li><strong>LOAD_PROFILE Format (Your File):</strong> DATE, TIME, PHASE_A_INST._VOLTAGE (V), PHASE_B_INST._VOLTAGE (V), PHASE_C_INST._VOLTAGE (V)</li>
+                        <li><strong>New Format:</strong> DATE, TIME, PHASE_A_INST, PHASE_B_, PHASE_C_</li>
+                        <li><strong>Legacy Format:</strong> time, Phase_A, Phase_B, Phase_C</li>
+                    </ul>
+                    <p style="margin-top: 10px; font-size: 0.9rem;">
+                        <strong>Note:</strong> The app automatically detects your format and combines DATE and TIME columns for the x-axis.
+                    </p>
+                </div>
+                
+                <div class="file-input-wrapper">
+                    <input type="file" id="csvFile" class="file-input" accept=".csv">
+                    <label for="csvFile" class="file-input-label">Choose CSV File</label>
+                </div>
+                
+                <div class="file-info" id="fileInfo"></div>
+                
+                <button class="btn btn-primary" id="uploadBtn" style="display: none;">Upload & Analyze</button>
+            </div>
+
+            <!-- Loading Indicator -->
+            <div class="loading" id="loading">
+                <div class="spinner"></div>
+                <p>Processing your data...</p>
+            </div>
+
+            <!-- Error/Success Messages -->
+            <div id="messageContainer"></div>
+            
+            <!-- Plotly Loading Status -->
+            <div id="plotlyStatus" style="display: none;" class="format-info">
+                <h4>⚠️ Plotly Library Status</h4>
+                <p id="plotlyStatusText">Checking Plotly library...</p>
+                <button class="btn btn-primary" id="retryPlotlyBtn" style="display: none;">Retry Loading Plotly</button>
+            </div>
+
+            <!-- File Details Section -->
+            <div class="file-details" id="fileDetailsSection" style="display: none;">
+                <h4>📊 File Information</h4>
+                <div id="fileDetails"></div>
+            </div>
+
+            <!-- Controls Section -->
+            <div class="controls-section" id="controlsSection" style="display: none;">
+                <h3>🎛️ Graph Controls</h3>
+                <div class="controls-grid">
+                    <div class="control-group">
+                        <label>Select Phases to Display:</label>
+                        <div class="phase-selector">
+                            <label class="phase-checkbox">
+                                <input type="checkbox" value="PHASE_A_INST" checked> Phase A
+                            </label>
+                            <label class="phase-checkbox">
+                                <input type="checkbox" value="PHASE_B_" checked> Phase B
+                            </label>
+                            <label class="phase-checkbox">
+                                <input type="checkbox" value="PHASE_C_" checked> Phase C
+                            </label>
+                        </div>
+                    </div>
+                    
+                    <div class="control-group">
+                        <label>Actions:</label>
+                        <div style="display: flex; gap: 10px;">
+                            <button class="btn btn-primary" id="updateGraphBtn">Update Graph</button>
+                            <button class="btn btn-success" id="downloadPngBtn">Download PNG</button>
+                            <button class="btn btn-secondary" id="downloadJpegBtn">Download JPEG</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Graph Section -->
+            <div class="graph-container" id="graphSection" style="display: none;">
+                <h3>📊 Electrical Data Visualization</h3>
+                <div id="plotly-chart"></div>
+            </div>
+
+            <!-- Statistics Section -->
+            <div class="stats-section" id="statsSection" style="display: none;">
+                <h3>📈 Data Statistics</h3>
+                <div class="stats-grid" id="statsGrid"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentSessionId = 'session_' + Date.now();
+        let currentData = null;
+        
+        // Check if Plotly is loaded when page loads
+        document.addEventListener('DOMContentLoaded', function() {
+            // Show status immediately
+            document.getElementById('plotlyStatus').style.display = 'block';
+            checkPlotlyLoaded();
+        });
+        
+        // Also check on window load as backup
+        window.addEventListener('load', function() {
+            if (typeof Plotly === 'undefined') {
+                checkPlotlyLoaded();
+            }
+        });
+        
+        function checkPlotlyLoaded() {
+            const statusDiv = document.getElementById('plotlyStatus');
+            const statusText = document.getElementById('plotlyStatusText');
+            const retryBtn = document.getElementById('retryPlotlyBtn');
+            
+            if (typeof Plotly === 'undefined') {
+                statusDiv.style.display = 'block';
+                statusText.textContent = 'Plotly library is not loaded. Please wait or retry.';
+                retryBtn.style.display = 'inline-block';
+                showMessage('Warning: Plotly library is still loading. Please wait a moment before uploading files.', 'error');
+                // Retry after a short delay
+                setTimeout(checkPlotlyLoaded, 2000);
+            } else {
+                console.log('Plotly loaded successfully');
+                statusDiv.style.display = 'none';
+                hideMessage();
+            }
+        }
+
+        // File input handling
+        document.getElementById('csvFile').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (file) {
+                const fileSizeMB = (file.size / (1024 * 1024)).toFixed(2);
+                document.getElementById('fileInfo').textContent = `Selected: ${file.name} (${fileSizeMB} MB)`;
+                document.getElementById('uploadBtn').style.display = 'inline-block';
+            }
+        });
+
+        // Upload button handling
+        document.getElementById('uploadBtn').addEventListener('click', function() {
+            const fileInput = document.getElementById('csvFile');
+            const file = fileInput.files[0];
+            
+            if (!file) {
+                showMessage('Please select a file first.', 'error');
+                return;
+            }
+
+            uploadFile(file);
+        });
+
+        // Phase selection change
+        document.querySelectorAll('.phase-checkbox input').forEach(checkbox => {
+            checkbox.addEventListener('change', function() {
+                updateGraph();
+            });
+        });
+
+        // Update graph button
+        document.getElementById('updateGraphBtn').addEventListener('click', updateGraph);
+
+        // Download buttons
+        document.getElementById('downloadPngBtn').addEventListener('click', () => downloadGraph('png'));
+        document.getElementById('downloadJpegBtn').addEventListener('click', () => downloadGraph('jpeg'));
+        
+        // Retry Plotly loading button
+        document.getElementById('retryPlotlyBtn').addEventListener('click', function() {
+            loadPlotlyManually();
+        });
+        
+        function loadPlotlyManually() {
+            const statusText = document.getElementById('plotlyStatusText');
+            statusText.textContent = 'Attempting to load Plotly from alternative source...';
+            
+            // Try to load from a different CDN
+            const script = document.createElement('script');
+            script.src = 'https://unpkg.com/plotly.js-dist@2.27.0/plotly.min.js';
+            script.onload = function() {
+                statusText.textContent = 'Plotly loaded successfully from alternative source!';
+                setTimeout(() => {
+                    checkPlotlyLoaded();
+                }, 1000);
+            };
+            script.onerror = function() {
+                statusText.textContent = 'Failed to load Plotly. Please check your internet connection and refresh the page.';
+            };
+            document.head.appendChild(script);
+        }
+
+        function uploadFile(file) {
+            // Check if Plotly is available before proceeding
+            if (typeof Plotly === 'undefined') {
+                showMessage('Error: Plotly library is not loaded. Please refresh the page and wait for it to load completely.', 'error');
+                return;
+            }
+            
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('session_id', currentSessionId);
+
+            showLoading(true);
+            hideMessage();
+            hideFileDetails();
+
+            fetch('/upload', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                showLoading(false);
+                if (data.success) {
+                    currentData = data;
+                    showMessage(`File uploaded successfully! Detected format: ${data.format_type}`, 'success');
+                    displayFileDetails(data);
+                    displayGraph(data.graph_data);
+                    displayStatistics(data.statistics);
+                    showControls();
+                } else {
+                    showMessage(data.error, 'error');
+                }
+            })
+            .catch(error => {
+                showLoading(false);
+                showMessage('Error uploading file: ' + error.message, 'error');
+            });
+        }
+
+        function updateGraph() {
+            const selectedPhases = Array.from(document.querySelectorAll('.phase-checkbox input:checked'))
+                .map(cb => cb.value);
+
+            if (selectedPhases.length === 0) {
+                showMessage('Please select at least one phase.', 'error');
+                return;
+            }
+
+            fetch('/generate_graph', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    session_id: currentSessionId,
+                    phases: selectedPhases
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    displayGraph(data.graph_data);
+                } else {
+                    showMessage(data.error, 'error');
+                }
+            })
+            .catch(error => {
+                showMessage('Error updating graph: ' + error.message, 'error');
+            });
+        }
+
+        function downloadGraph(format) {
+            const selectedPhases = Array.from(document.querySelectorAll('.phase-checkbox input:checked'))
+                .map(cb => cb.value);
+
+            if (selectedPhases.length === 0) {
+                showMessage('Please select at least one phase.', 'error');
+                return;
+            }
+
+            fetch('/download_graph', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    session_id: currentSessionId,
+                    phases: selectedPhases,
+                    format: format
+                })
+            })
+            .then(response => {
+                if (response.ok) {
+                    return response.blob();
+                }
+                throw new Error('Download failed');
+            })
+            .then(blob => {
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `electrical_data.${format}`;
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                document.body.removeChild(a);
+                showMessage(`Graph downloaded as ${format.toUpperCase()} successfully!`, 'success');
+            })
+            .catch(error => {
+                showMessage('Error downloading graph: ' + error.message, 'error');
+            });
+        }
+
+        function displayFileDetails(data) {
+            const fileDetails = document.getElementById('fileDetails');
+            fileDetails.innerHTML = `
+                <p><strong>Filename:</strong> ${data.filename}</p>
+                <p><strong>Detected Format:</strong> ${data.format_type}</p>
+                <p><strong>Total Rows:</strong> ${data.row_count.toLocaleString()}</p>
+                <p><strong>Columns:</strong> ${data.columns.length}</p>
+                <p><strong>Voltage Columns:</strong> ${data.columns.filter(col => col.includes('VOLTAGE') || col.includes('PHASE')).join(', ')}</p>
+            `;
+            document.getElementById('fileDetailsSection').style.display = 'block';
+        }
+
+        function displayGraph(graphData) {
+            // Check if Plotly is available
+            if (typeof Plotly === 'undefined') {
+                showMessage('Error: Plotly library is not loaded. Please refresh the page and try again.', 'error');
+                return;
+            }
+            
+            try {
+                const plotDiv = document.getElementById('plotly-chart');
+                
+                // Validate graph data
+                if (!graphData || !graphData.data || !Array.isArray(graphData.data)) {
+                    showMessage('Error: Invalid graph data received from server', 'error');
+                    console.error('Invalid graph data:', graphData);
+                    return;
+                }
+                
+                Plotly.newPlot(plotDiv, graphData.data, graphData.layout, {
+                    responsive: true,
+                    displayModeBar: true,
+                    modeBarButtonsToRemove: ['pan2d', 'lasso2d', 'select2d']
+                });
+                
+                document.getElementById('graphSection').style.display = 'block';
+            } catch (error) {
+                showMessage('Error displaying graph: ' + error.message, 'error');
+                console.error('Plotly error:', error);
+                
+                // Try to show a fallback message
+                const plotDiv = document.getElementById('plotly-chart');
+                plotDiv.innerHTML = '<div style="text-align: center; padding: 50px; color: #666;"><h3>Graph Display Error</h3><p>There was an issue displaying the graph. Please try refreshing the page or contact support.</p></div>';
+                document.getElementById('graphSection').style.display = 'block';
+            }
+        }
+
+        function displayStatistics(stats) {
+            const statsGrid = document.getElementById('statsGrid');
+            statsGrid.innerHTML = '';
+
+            Object.entries(stats).forEach(([phase, data]) => {
+                const statCard = document.createElement('div');
+                statCard.className = 'stat-card';
+                statCard.innerHTML = `
+                    <h4>${phase.replace('_', ' ').replace('PHASE A INST', 'Phase A').replace('PHASE B ', 'Phase B').replace('PHASE C ', 'Phase C')}</h4>
+                    <div class="stat-value">${data.mean.toFixed(2)}</div>
+                    <div class="stat-unit">Average (V)</div>
+                    <div style="margin-top: 10px; font-size: 0.9rem;">
+                        <div>Min: ${data.min.toFixed(2)} V</div>
+                        <div>Max: ${data.max.toFixed(2)} V</div>
+                        <div>Std Dev: ${data.std.toFixed(2)} V</div>
+                    </div>
+                `;
+                statsGrid.appendChild(statCard);
+            });
+
+            document.getElementById('statsSection').style.display = 'block';
+        }
+
+        function showControls() {
+            document.getElementById('controlsSection').style.display = 'block';
+        }
+
+        function showLoading(show) {
+            document.getElementById('loading').style.display = show ? 'block' : 'none';
+        }
+
+        function showMessage(message, type) {
+            const messageContainer = document.getElementById('messageContainer');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = type === 'error' ? 'error-message' : 'success-message';
+            messageDiv.textContent = message;
+            
+            messageContainer.innerHTML = '';
+            messageContainer.appendChild(messageDiv);
+
+            // Auto-hide success messages after 5 seconds
+            if (type === 'success') {
+                setTimeout(() => {
+                    messageDiv.remove();
+                }, 5000);
+            }
+        }
+
+        function hideMessage() {
+            document.getElementById('messageContainer').innerHTML = '';
+        }
+
+        function hideFileDetails() {
+            document.getElementById('fileDetailsSection').style.display = 'none';
+        }
+    </script>
+</body>
+</html>

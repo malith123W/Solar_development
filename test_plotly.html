@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Plotly Test</title>
+    <!-- Load Plotly with multiple CDN fallbacks -->
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+    <script>
+        // Fallback if primary CDN fails
+        if (typeof Plotly === 'undefined') {
+            document.write('<script src="https://cdn.jsdelivr.net/npm/plotly.js-dist@2.27.0/plotly.min.js"><\/script>');
+        }
+        // Additional fallback
+        if (typeof Plotly === 'undefined') {
+            document.write('<script src="https://unpkg.com/plotly.js-dist@2.27.0/plotly.min.js"><\/script>');
+        }
+    </script>
+</head>
+<body>
+    <h1>Plotly Loading Test</h1>
+    <div id="plotlyStatus"></div>
+    <div id="testChart" style="width:600px;height:400px;"></div>
+    
+    <script>
+        function checkPlotly() {
+            const statusDiv = document.getElementById('plotlyStatus');
+            if (typeof Plotly === 'undefined') {
+                statusDiv.innerHTML = '<p style="color: red;">❌ Plotly is NOT loaded</p>';
+            } else {
+                statusDiv.innerHTML = '<p style="color: green;">✅ Plotly is loaded successfully!</p>';
+                
+                // Test creating a simple chart
+                const data = [{
+                    x: [1, 2, 3, 4],
+                    y: [10, 11, 12, 13],
+                    type: 'scatter'
+                }];
+                
+                const layout = {
+                    title: 'Test Chart'
+                };
+                
+                Plotly.newPlot('testChart', data, layout);
+            }
+        }
+        
+        // Check immediately
+        checkPlotly();
+        
+        // Check after a delay
+        setTimeout(checkPlotly, 1000);
+        setTimeout(checkPlotly, 2000);
+    </script>
+</body>
+</html>
