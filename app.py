@@ -9,6 +9,7 @@ from werkzeug.utils import secure_filename
 import base64
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
+import numpy as np
 
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 100MB max file size for large files
@@ -464,11 +465,14 @@ def pq_generate_report():
             consumers_blob=pq_state.get('consumers', {})
         )
 
+        # Ensure JSON-safe types
+        report_safe = _to_json_safe(report)
+
         # Persist report for download
-        pq_state['report'] = report
+        pq_state['report'] = report_safe
         session_data[session_id]['pq'] = pq_state
 
-        return jsonify({'success': True, 'report': report})
+        return jsonify({'success': True, 'report': report_safe})
     except Exception as e:
         print(f"Error generating PQ report: {str(e)}")
         return jsonify({'error': f'Could not generate report: {str(e)}'}), 500
@@ -485,7 +489,8 @@ def pq_download_report():
 
     try:
         report = session_data[session_id]['pq']['report']
-        buf = io.BytesIO(json.dumps(report, indent=2).encode('utf-8'))
+        report_safe = _to_json_safe(report)
+        buf = io.BytesIO(json.dumps(report_safe, indent=2).encode('utf-8'))
         buf.seek(0)
         return send_file(buf, mimetype='application/json', as_attachment=True, download_name=filename)
     except Exception as e:
@@ -1074,7 +1079,7 @@ def _build_pq_report(nmd_df: pd.DataFrame, nmd_info: Dict, feeder_id_col: str, f
             'overall_within_pct': round(weighted_within, 2),
             'overall_over_pct': round(weighted_over, 2),
             'overall_under_pct': round(weighted_under, 2),
-            'maintained': maintained,
+            'maintained': bool(maintained),
             'time_range': time_range,
             'num_feeders': len(feeder_results),
             'num_consumers': len(consumer_results)
@@ -1084,6 +1089,42 @@ def _build_pq_report(nmd_df: pd.DataFrame, nmd_info: Dict, feeder_id_col: str, f
         'limits': limits,
         'suggestions': suggestions
     }
+
+
+def _to_json_safe(obj):
+    """Recursively convert numpy/pandas types into JSON-serializable Python types."""
+    # Primitives and None
+    if obj is None or isinstance(obj, (str, int, float, bool)):
+        return obj
+
+    # Numpy scalars
+    if isinstance(obj, np.generic):
+        return obj.item()
+
+    # Pandas Timestamp
+    if isinstance(obj, pd.Timestamp):
+        return obj.isoformat()
+
+    # Dict
+    if isinstance(obj, dict):
+        return {str(_to_json_safe(k)): _to_json_safe(v) for k, v in obj.items()}
+
+    # List or Tuple
+    if isinstance(obj, (list, tuple)):
+        return [_to_json_safe(v) for v in obj]
+
+    # Pandas Series/DataFrame
+    if isinstance(obj, pd.Series):
+        return [_to_json_safe(v) for v in obj.tolist()]
+    if isinstance(obj, pd.DataFrame):
+        return [_to_json_safe(rec) for rec in obj.to_dict(orient='records')]
+
+    # Fallback to string
+    try:
+        json.dumps(obj)
+        return obj
+    except Exception:
+        return str(obj)
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)
