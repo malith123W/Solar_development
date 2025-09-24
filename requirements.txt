@@ -8,3 +8,7 @@ numpy>=2.0.0
 # Ensure build backends are available
 setuptools>=68.0.0
 wheel>=0.41.0
+# PDF generation dependencies
+reportlab==4.0.7
+matplotlib==3.8.2
+Pillow==10.1.0

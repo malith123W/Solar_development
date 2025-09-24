@@ -10,6 +10,17 @@ import base64
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 import numpy as np
+# PDF generation imports
+from reportlab.lib.pagesizes import letter, A4
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image, PageBreak
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import inch
+from reportlab.lib import colors
+from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+from matplotlib.backends.backend_agg import FigureCanvasAgg
+import tempfile
 
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 100MB max file size for large files
@@ -497,6 +508,33 @@ def pq_download_report():
         print(f"Error preparing PQ report download: {str(e)}")
         return jsonify({'error': f'Could not download report: {str(e)}'}), 500
 
+@app.route('/pq_download_pdf', methods=['POST'])
+def pq_download_pdf():
+    data = request.json or {}
+    session_id = data.get('session_id', 'default')
+    transformer_number = data.get('transformer_number', 'T-001')
+
+    if session_id not in session_data or 'pq' not in session_data[session_id] or 'report' not in session_data[session_id]['pq']:
+        return jsonify({'error': 'No report available. Generate the report first.'}), 400
+
+    try:
+        report = session_data[session_id]['pq']['report']
+        nmd_data = session_data[session_id]['pq']['nmd']
+        consumers_data = session_data[session_id]['pq'].get('consumers', {})
+        
+        # Generate PDF
+        pdf_buffer = generate_power_quality_pdf(report, nmd_data, consumers_data, transformer_number)
+        
+        return send_file(
+            pdf_buffer,
+            mimetype='application/pdf',
+            as_attachment=True,
+            download_name=f'Power_Quality_Analysis_Report_{transformer_number}.pdf'
+        )
+    except Exception as e:
+        print(f"Error generating PDF: {str(e)}")
+        return jsonify({'error': f'Could not generate PDF: {str(e)}'}), 500
+
 def detect_data_format(df):
     """Detect the format of the CSV data and available parameters"""
     data_info = {
@@ -917,26 +955,77 @@ def _detect_feeder_id_column(df: pd.DataFrame) -> Optional[str]:
     return None
 
 
-def _evaluate_voltage_series(series: pd.Series, v_min: float, v_max: float) -> Dict[str, float]:
+def _evaluate_voltage_series(series: pd.Series, v_min: float, v_max: float, v_min_strict: float = None, v_max_strict: float = None) -> Dict[str, float]:
     s = pd.to_numeric(series, errors='coerce').dropna()
     total = len(s)
     if total == 0:
-        return {'count': 0, 'within_pct': 0.0, 'over_pct': 0.0, 'under_pct': 0.0, 'min': None, 'max': None, 'mean': None}
-    within = ((s >= v_min) & (s <= v_max)).sum()
-    over = (s > v_max).sum()
-    under = (s < v_min).sum()
+        return {'count': 0, 'within_pct': 0.0, 'over_pct': 0.0, 'under_pct': 0.0, 'interruption_pct': 0.0, 'min': None, 'max': None, 'mean': None, 'within_strict_pct': 0.0, 'over_strict_pct': 0.0, 'under_strict_pct': 0.0}
+    
+    # Separate zero voltage values (interruptions) from non-zero values
+    zero_voltage = (s == 0).sum()
+    non_zero_voltage = s[s != 0]
+    
+    # Calculate interruption percentage
+    interruption_pct = round(zero_voltage * 100.0 / total, 2)
+    
+    # Only calculate voltage quality metrics for non-zero values
+    if len(non_zero_voltage) == 0:
+        # All values are zero (complete interruption)
+        return {
+            'count': int(total),
+            'within_pct': 0.0,
+            'over_pct': 0.0,
+            'under_pct': 0.0,
+            'interruption_pct': interruption_pct,
+            'min': 0.0,
+            'max': 0.0,
+            'mean': 0.0,
+            'within_strict_pct': 0.0,
+            'over_strict_pct': 0.0,
+            'under_strict_pct': 0.0
+        }
+    
+    # Calculate voltage quality metrics for standard limits (207-253V)
+    within = ((non_zero_voltage >= v_min) & (non_zero_voltage <= v_max)).sum()
+    over = (non_zero_voltage > v_max).sum()
+    under = (non_zero_voltage < v_min).sum()
+    
+    # Calculate percentages based on non-zero voltage readings only
+    non_zero_total = len(non_zero_voltage)
+    within_pct = round(within * 100.0 / non_zero_total, 2) if non_zero_total > 0 else 0.0
+    over_pct = round(over * 100.0 / non_zero_total, 2) if non_zero_total > 0 else 0.0
+    under_pct = round(under * 100.0 / non_zero_total, 2) if non_zero_total > 0 else 0.0
+    
+    # Calculate strict limits (216-244V) if provided
+    within_strict_pct = 0.0
+    over_strict_pct = 0.0
+    under_strict_pct = 0.0
+    
+    if v_min_strict is not None and v_max_strict is not None:
+        within_strict = ((non_zero_voltage >= v_min_strict) & (non_zero_voltage <= v_max_strict)).sum()
+        over_strict = (non_zero_voltage > v_max_strict).sum()
+        under_strict = (non_zero_voltage < v_min_strict).sum()
+        
+        within_strict_pct = round(within_strict * 100.0 / non_zero_total, 2) if non_zero_total > 0 else 0.0
+        over_strict_pct = round(over_strict * 100.0 / non_zero_total, 2) if non_zero_total > 0 else 0.0
+        under_strict_pct = round(under_strict * 100.0 / non_zero_total, 2) if non_zero_total > 0 else 0.0
+    
     return {
         'count': int(total),
-        'within_pct': round(within * 100.0 / total, 2),
-        'over_pct': round(over * 100.0 / total, 2),
-        'under_pct': round(under * 100.0 / total, 2),
-        'min': float(s.min()),
-        'max': float(s.max()),
-        'mean': float(s.mean())
+        'within_pct': within_pct,
+        'over_pct': over_pct,
+        'under_pct': under_pct,
+        'interruption_pct': interruption_pct,
+        'min': float(non_zero_voltage.min()) if len(non_zero_voltage) > 0 else 0.0,
+        'max': float(non_zero_voltage.max()) if len(non_zero_voltage) > 0 else 0.0,
+        'mean': float(non_zero_voltage.mean()) if len(non_zero_voltage) > 0 else 0.0,
+        'within_strict_pct': within_strict_pct,
+        'over_strict_pct': over_strict_pct,
+        'under_strict_pct': under_strict_pct
     }
 
 
-def _compute_feeder_metrics(nmd_df: pd.DataFrame, nmd_info: Dict, feeder_id_col: str, feeders: List[str], v_min: float, v_max: float) -> List[Dict]:
+def _compute_feeder_metrics(nmd_df: pd.DataFrame, nmd_info: Dict, feeder_id_col: str, feeders: List[str], v_min: float, v_max: float, v_min_strict: float = None, v_max_strict: float = None) -> List[Dict]:
     voltage_cols = [c for c in nmd_info.get('voltage_columns', []) if c in nmd_df.columns]
     results = []
     for feeder in feeders:
@@ -945,15 +1034,15 @@ def _compute_feeder_metrics(nmd_df: pd.DataFrame, nmd_info: Dict, feeder_id_col:
         stacked_values = []
         for idx, col in enumerate(voltage_cols):
             phase_name = f"Phase {chr(65 + idx)}"
-            m = _evaluate_voltage_series(grp[col] if col in grp.columns else pd.Series([], dtype=float), v_min, v_max)
+            m = _evaluate_voltage_series(grp[col] if col in grp.columns else pd.Series([], dtype=float), v_min, v_max, v_min_strict, v_max_strict)
             phase_metrics[phase_name] = m
             if 'count' in m and m['count'] > 0 and col in grp.columns:
                 stacked_values.append(pd.to_numeric(grp[col], errors='coerce'))
         if stacked_values:
             stacked = pd.concat(stacked_values).dropna()
-            overall = _evaluate_voltage_series(stacked, v_min, v_max)
+            overall = _evaluate_voltage_series(stacked, v_min, v_max, v_min_strict, v_max_strict)
         else:
-            overall = {'count': 0, 'within_pct': 0.0, 'over_pct': 0.0, 'under_pct': 0.0, 'min': None, 'max': None, 'mean': None}
+            overall = {'count': 0, 'within_pct': 0.0, 'over_pct': 0.0, 'under_pct': 0.0, 'min': None, 'max': None, 'mean': None, 'within_strict_pct': 0.0, 'over_strict_pct': 0.0, 'under_strict_pct': 0.0}
 
         results.append({
             'feeder_ref': str(feeder),
@@ -963,7 +1052,7 @@ def _compute_feeder_metrics(nmd_df: pd.DataFrame, nmd_info: Dict, feeder_id_col:
     return results
 
 
-def _compute_consumer_metrics(consumers_blob: Dict[str, Dict], v_min: float, v_max: float) -> List[Dict]:
+def _compute_consumer_metrics(consumers_blob: Dict[str, Dict], v_min: float, v_max: float, v_min_strict: float = None, v_max_strict: float = None) -> List[Dict]:
     consumer_results = []
     for consumer_id, blob in consumers_blob.items():
         df = pd.DataFrame(blob['data'])
@@ -975,15 +1064,15 @@ def _compute_consumer_metrics(consumers_blob: Dict[str, Dict], v_min: float, v_m
         for idx, col in enumerate(voltage_cols):
             if col in df.columns:
                 phase_name = f"Phase {chr(65 + idx)}" if len(voltage_cols) > 1 else 'Voltage'
-                m = _evaluate_voltage_series(df[col], v_min, v_max)
+                m = _evaluate_voltage_series(df[col], v_min, v_max, v_min_strict, v_max_strict)
                 phase_metrics[phase_name] = m
                 stacked_values.append(pd.to_numeric(df[col], errors='coerce'))
 
         if stacked_values:
             stacked = pd.concat(stacked_values).dropna()
-            overall = _evaluate_voltage_series(stacked, v_min, v_max)
+            overall = _evaluate_voltage_series(stacked, v_min, v_max, v_min_strict, v_max_strict)
         else:
-            overall = {'count': 0, 'within_pct': 0.0, 'over_pct': 0.0, 'under_pct': 0.0, 'min': None, 'max': None, 'mean': None}
+            overall = {'count': 0, 'within_pct': 0.0, 'over_pct': 0.0, 'under_pct': 0.0, 'min': None, 'max': None, 'mean': None, 'within_strict_pct': 0.0, 'over_strict_pct': 0.0, 'under_strict_pct': 0.0}
 
         # Current and Power Factor summaries if available
         current_cols = di.get('current', {}).get('columns', []) if di else []
@@ -1019,8 +1108,11 @@ def _generate_pq_suggestions(feeders: List[Dict], consumers: List[Dict], limits:
         name = f.get('feeder_ref')
         ov = f['overall'].get('over_pct', 0.0)
         uv = f['overall'].get('under_pct', 0.0)
+        interruption = f['overall'].get('interruption_pct', 0.0)
         fmax = f['overall'].get('max')
         fmin = f['overall'].get('min')
+        if interruption >= 1.0:
+            suggestions.append(f"Feeder {name}: Power interruptions detected ({interruption:.1f}%). Investigate protective device operations, fault conditions, and supply reliability issues.")
         if ov >= 5.0 or (fmax is not None and fmax > v_max):
             suggestions.append(f"Feeder {name}: Frequent over-voltage. Consider AVR/tap adjustment, feeder load balancing, and reviewing capacitor banks for over-compensation.")
         if uv >= 5.0 or (fmin is not None and fmin < v_min):
@@ -1031,7 +1123,10 @@ def _generate_pq_suggestions(feeders: List[Dict], consumers: List[Dict], limits:
         feeder = c.get('feeder_ref')
         ov = c['overall'].get('over_pct', 0.0)
         uv = c['overall'].get('under_pct', 0.0)
+        interruption = c['overall'].get('interruption_pct', 0.0)
         avg_pf = c.get('average_power_factor')
+        if interruption >= 1.0:
+            suggestions.append(f"Consumer {cid} (Feeder {feeder}): Power interruptions detected ({interruption:.1f}%). Check service connections, protective devices, and upstream supply reliability.")
         if avg_pf is not None and avg_pf < 0.9:
             suggestions.append(f"Consumer {cid} (Feeder {feeder}): Low PF ({avg_pf:.2f}). Install/optimize capacitor banks to improve PF and reduce voltage drops.")
         if uv >= 5.0:
@@ -1045,28 +1140,51 @@ def _generate_pq_suggestions(feeders: List[Dict], consumers: List[Dict], limits:
 
 
 def _build_pq_report(nmd_df: pd.DataFrame, nmd_info: Dict, feeder_id_col: str, feeders_to_use: List[str], consumers_blob: Dict[str, Dict]) -> Dict:
-    # Limits
-    limits = {'nominal': 230.0, 'min': 207.0, 'max': 253.0, 'accept_threshold_pct': 95.0}
+    # Limits - Standard (207-253V) and Strict (216-244V)
+    limits = {
+        'nominal': 230.0, 
+        'min': 207.0, 
+        'max': 253.0, 
+        'min_strict': 216.0, 
+        'max_strict': 244.0,
+        'accept_threshold_pct': 95.0
+    }
 
-    # Compute feeder metrics
+    # Compute feeder metrics with both limit ranges
     feeder_results = _compute_feeder_metrics(
         nmd_df=nmd_df,
         nmd_info=nmd_info,
         feeder_id_col=feeder_id_col,
         feeders=feeders_to_use,
         v_min=limits['min'],
-        v_max=limits['max']
+        v_max=limits['max'],
+        v_min_strict=limits['min_strict'],
+        v_max_strict=limits['max_strict']
     )
 
-    # Overall transformer metrics (weighted by sample counts)
+    # Overall transformer metrics (weighted by sample counts) for standard limits
     total_counts = sum([f['overall'].get('count', 0) for f in feeder_results]) or 1
     weighted_within = sum([(f['overall'].get('within_pct', 0.0) * f['overall'].get('count', 0)) for f in feeder_results]) / total_counts
     weighted_over = sum([(f['overall'].get('over_pct', 0.0) * f['overall'].get('count', 0)) for f in feeder_results]) / total_counts
     weighted_under = sum([(f['overall'].get('under_pct', 0.0) * f['overall'].get('count', 0)) for f in feeder_results]) / total_counts
+    weighted_interruption = sum([(f['overall'].get('interruption_pct', 0.0) * f['overall'].get('count', 0)) for f in feeder_results]) / total_counts
+    
+    # Overall transformer metrics for strict limits
+    weighted_within_strict = sum([(f['overall'].get('within_strict_pct', 0.0) * f['overall'].get('count', 0)) for f in feeder_results]) / total_counts
+    weighted_over_strict = sum([(f['overall'].get('over_strict_pct', 0.0) * f['overall'].get('count', 0)) for f in feeder_results]) / total_counts
+    weighted_under_strict = sum([(f['overall'].get('under_strict_pct', 0.0) * f['overall'].get('count', 0)) for f in feeder_results]) / total_counts
+    
     maintained = weighted_within >= limits['accept_threshold_pct']
+    maintained_strict = weighted_within_strict >= limits['accept_threshold_pct']
 
-    # Consumers
-    consumer_results = _compute_consumer_metrics(consumers_blob=consumers_blob, v_min=limits['min'], v_max=limits['max'])
+    # Consumers with both limit ranges
+    consumer_results = _compute_consumer_metrics(
+        consumers_blob=consumers_blob, 
+        v_min=limits['min'], 
+        v_max=limits['max'],
+        v_min_strict=limits['min_strict'],
+        v_max_strict=limits['max_strict']
+    )
 
     # Time range from NMD data
     time_range = get_time_range(nmd_df)
@@ -1079,7 +1197,12 @@ def _build_pq_report(nmd_df: pd.DataFrame, nmd_info: Dict, feeder_id_col: str, f
             'overall_within_pct': round(weighted_within, 2),
             'overall_over_pct': round(weighted_over, 2),
             'overall_under_pct': round(weighted_under, 2),
+            'overall_interruption_pct': round(weighted_interruption, 2),
+            'overall_within_strict_pct': round(weighted_within_strict, 2),
+            'overall_over_strict_pct': round(weighted_over_strict, 2),
+            'overall_under_strict_pct': round(weighted_under_strict, 2),
             'maintained': bool(maintained),
+            'maintained_strict': bool(maintained_strict),
             'time_range': time_range,
             'num_feeders': len(feeder_results),
             'num_consumers': len(consumer_results)
@@ -1125,6 +1248,439 @@ def _to_json_safe(obj):
         return obj
     except Exception:
         return str(obj)
+
+# -----------------------------
+# PDF Generation Functions
+# -----------------------------
+
+def create_voltage_chart(df, voltage_columns, title="Voltage Profile"):
+    """Create a voltage profile chart using matplotlib"""
+    fig, ax = plt.subplots(figsize=(10, 6))
+    
+    # Convert time column to datetime if it exists
+    if 'time' in df.columns:
+        df['time'] = pd.to_datetime(df['time'])
+        x_data = df['time']
+    else:
+        x_data = range(len(df))
+    
+    # Use different line styles instead of colors for black and white
+    line_styles = ['-', '--', '-.', ':']
+    
+    for i, col in enumerate(voltage_columns):
+        if col in df.columns:
+            phase_name = f"Phase {chr(65 + i)}" if len(voltage_columns) > 1 else "Voltage"
+            ax.plot(x_data, df[col], label=phase_name, linestyle=line_styles[i % len(line_styles)], linewidth=1.5, color='black')
+    
+    # Add voltage limits
+    ax.axhline(y=207, color='black', linestyle='--', alpha=0.7, label='Min Limit (207V)')
+    ax.axhline(y=253, color='black', linestyle='--', alpha=0.7, label='Max Limit (253V)')
+    ax.axhline(y=230, color='black', linestyle='-', alpha=0.5, label='Nominal (230V)')
+    
+    ax.set_title(title, fontsize=14, fontweight='bold', color='black')
+    ax.set_xlabel('Time', color='black')
+    ax.set_ylabel('Voltage (V)', color='black')
+    ax.legend()
+    ax.grid(True, alpha=0.3, color='black')
+    ax.tick_params(colors='black')
+    
+    # Format x-axis for time series
+    if 'time' in df.columns:
+        ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
+        plt.xticks(rotation=45)
+    
+    plt.tight_layout()
+    return fig
+
+def create_current_chart(df, current_columns, title="Current Profile"):
+    """Create a current profile chart using matplotlib"""
+    fig, ax = plt.subplots(figsize=(10, 6))
+    
+    # Convert time column to datetime if it exists
+    if 'time' in df.columns:
+        df['time'] = pd.to_datetime(df['time'])
+        x_data = df['time']
+    else:
+        x_data = range(len(df))
+    
+    # Use different line styles instead of colors for black and white
+    line_styles = ['-', '--', '-.', ':']
+    
+    for i, col in enumerate(current_columns):
+        if col in df.columns:
+            phase_name = f"Phase {chr(65 + i)}" if len(current_columns) > 1 else "Current"
+            ax.plot(x_data, df[col], label=phase_name, linestyle=line_styles[i % len(line_styles)], linewidth=1.5, color='black')
+    
+    ax.set_title(title, fontsize=14, fontweight='bold', color='black')
+    ax.set_xlabel('Time', color='black')
+    ax.set_ylabel('Current (A)', color='black')
+    ax.legend()
+    ax.grid(True, alpha=0.3, color='black')
+    ax.tick_params(colors='black')
+    
+    # Format x-axis for time series
+    if 'time' in df.columns:
+        ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
+        plt.xticks(rotation=45)
+    
+    plt.tight_layout()
+    return fig
+
+def create_power_factor_chart(df, pf_columns, title="Power Factor Profile"):
+    """Create a power factor profile chart using matplotlib"""
+    fig, ax = plt.subplots(figsize=(10, 6))
+    
+    # Convert time column to datetime if it exists
+    if 'time' in df.columns:
+        df['time'] = pd.to_datetime(df['time'])
+        x_data = df['time']
+    else:
+        x_data = range(len(df))
+    
+    for col in pf_columns:
+        if col in df.columns:
+            ax.plot(x_data, df[col], label='Power Factor', color='black', linewidth=1.5)
+    
+    # Add power factor limits
+    ax.axhline(y=0.9, color='black', linestyle='--', alpha=0.7, label='Min Acceptable (0.9)')
+    ax.axhline(y=1.0, color='black', linestyle='-', alpha=0.5, label='Ideal (1.0)')
+    
+    ax.set_title(title, fontsize=14, fontweight='bold', color='black')
+    ax.set_xlabel('Time', color='black')
+    ax.set_ylabel('Power Factor', color='black')
+    ax.legend()
+    ax.grid(True, alpha=0.3, color='black')
+    ax.set_ylim(0, 1.1)
+    ax.tick_params(colors='black')
+    
+    # Format x-axis for time series
+    if 'time' in df.columns:
+        ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
+        plt.xticks(rotation=45)
+    
+    plt.tight_layout()
+    return fig
+
+def create_voltage_quality_pie_chart(within_pct, over_pct, under_pct, interruption_pct):
+    """Create a pie chart showing voltage quality distribution"""
+    fig, ax = plt.subplots(figsize=(8, 8))
+    
+    labels = ['Within Limits', 'Over Voltage', 'Under Voltage', 'Interruptions']
+    sizes = [within_pct, over_pct, under_pct, interruption_pct]
+    colors = ['#28a745', '#dc3545', '#ffc107', '#6c757d']
+    
+    # Only show non-zero values
+    filtered_labels = []
+    filtered_sizes = []
+    filtered_colors = []
+    
+    for i, size in enumerate(sizes):
+        if size > 0:
+            filtered_labels.append(f'{labels[i]} ({size:.1f}%)')
+            filtered_sizes.append(size)
+            filtered_colors.append(colors[i])
+    
+    if filtered_sizes:
+        ax.pie(filtered_sizes, labels=filtered_labels, colors=filtered_colors, autopct='%1.1f%%', startangle=90)
+        ax.set_title('Voltage Quality Distribution', fontsize=14, fontweight='bold')
+    else:
+        ax.text(0.5, 0.5, 'No Data Available', ha='center', va='center', transform=ax.transAxes, fontsize=12)
+        ax.set_title('Voltage Quality Distribution', fontsize=14, fontweight='bold')
+    
+    plt.tight_layout()
+    return fig
+
+def save_chart_to_buffer(fig):
+    """Save matplotlib figure to BytesIO buffer"""
+    buffer = io.BytesIO()
+    fig.savefig(buffer, format='png', dpi=300, bbox_inches='tight')
+    buffer.seek(0)
+    plt.close(fig)
+    return buffer
+
+def generate_power_quality_pdf(report, nmd_data, consumers_data, transformer_number='T-001'):
+    """Generate a comprehensive 2-page Power Quality Analysis PDF report"""
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=72, leftMargin=72, topMargin=72, bottomMargin=72)
+    
+    # Get styles
+    styles = getSampleStyleSheet()
+    
+    # Create custom styles (black and white only)
+    title_style = ParagraphStyle(
+        'CustomTitle',
+        parent=styles['Heading1'],
+        fontSize=24,
+        spaceAfter=30,
+        alignment=TA_CENTER,
+        textColor=colors.black
+    )
+    
+    heading_style = ParagraphStyle(
+        'CustomHeading',
+        parent=styles['Heading2'],
+        fontSize=16,
+        spaceAfter=12,
+        textColor=colors.black
+    )
+    
+    subheading_style = ParagraphStyle(
+        'CustomSubHeading',
+        parent=styles['Heading3'],
+        fontSize=14,
+        spaceAfter=8,
+        textColor=colors.black
+    )
+    
+    # Create list item style
+    list_style = ParagraphStyle(
+        'CustomList',
+        parent=styles['Normal'],
+        fontSize=12,
+        spaceAfter=6,
+        leftIndent=20,
+        bulletIndent=10
+    )
+    
+    # Build the story (content)
+    story = []
+    
+    # Page 1: Header and Overview
+    story.append(Paragraph("Power Quality Analysis Report", title_style))
+    
+    # Header information in list format
+    transformer_info = report.get('transformer', {})
+    time_range = transformer_info.get('time_range', {})
+    
+    # Get feeder names from the data (one per line)
+    feeders = report.get('feeders', [])
+    feeder_names = [f.get('feeder_ref', '') for f in feeders[:4]] if feeders else ['N/A']
+    
+    # Get customer numbers from consumers (one per line)
+    consumers = report.get('consumers', [])
+    customer_numbers = [c.get('consumer_id', '') for c in consumers[:4]] if consumers else ['Multiple']
+    
+    # Get status information
+    status = "Maintained" if transformer_info.get('maintained', False) else "Not Maintained"
+    
+    # Create header list with tab spacing for better page utilization
+    story.append(Paragraph(f"<b>Transformer Number:</b> {transformer_number}", list_style))
+    
+    # Customer numbers in vertical list format
+    story.append(Paragraph("<b>Customer Numbers:</b>", list_style))
+    for customer in customer_numbers:
+        story.append(Paragraph(f"&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;{customer}", list_style))
+    
+    # Feeder names in vertical list format
+    story.append(Paragraph("<b>Feeder Names:</b>", list_style))
+    for feeder in feeder_names:
+        story.append(Paragraph(f"&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;{feeder}", list_style))
+    
+    story.append(Paragraph(f"<b>Analysis Period:</b> {time_range.get('min_date', 'N/A')} to {time_range.get('max_date', 'N/A')}", list_style))
+    story.append(Paragraph(f"<b>Status:</b> {status}", list_style))
+    
+    story.append(Spacer(1, 20))
+    
+    # Overall System Performance
+    story.append(Paragraph("Overall System Performance", heading_style))
+    
+    # KPI Table (simplified - no status column, no total rows)
+    kpi_data = [
+        [Paragraph('Parameter', styles['Normal']), 
+         Paragraph('Standard Limits (207-253V)', styles['Normal']), 
+         Paragraph('Strict Limits (216-244V)', styles['Normal'])],
+        [Paragraph('Within Limits', styles['Normal']), 
+         Paragraph(f"{transformer_info.get('overall_within_pct', 0):.2f}%", styles['Normal']), 
+         Paragraph(f"{transformer_info.get('overall_within_strict_pct', 0):.2f}%", styles['Normal'])],
+        [Paragraph('Over Voltage', styles['Normal']), 
+         Paragraph(f"{transformer_info.get('overall_over_pct', 0):.2f}%", styles['Normal']), 
+         Paragraph(f"{transformer_info.get('overall_over_strict_pct', 0):.2f}%", styles['Normal'])],
+        [Paragraph('Under Voltage', styles['Normal']), 
+         Paragraph(f"{transformer_info.get('overall_under_pct', 0):.2f}%", styles['Normal']), 
+         Paragraph(f"{transformer_info.get('overall_under_strict_pct', 0):.2f}%", styles['Normal'])],
+        [Paragraph('Interruptions', styles['Normal']), 
+         Paragraph(f"{transformer_info.get('overall_interruption_pct', 0):.2f}%", styles['Normal']), 
+         Paragraph('', styles['Normal'])]
+    ]
+    
+    kpi_table = Table(kpi_data, colWidths=[2*inch, 1.5*inch, 1.5*inch])
+    kpi_table.setStyle(TableStyle([
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 10),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black)
+    ]))
+    
+    story.append(kpi_table)
+    story.append(Spacer(1, 20))
+    
+    # Feeder Analysis Table (moved to Page 1)
+    story.append(Paragraph("Feeder-wise Analysis", subheading_style))
+    
+    feeders = report.get('feeders', [])
+    if feeders:
+        # Create header row with Paragraph objects for better text wrapping
+        feeder_data = [[Paragraph('Feeder', styles['Normal']), 
+                       Paragraph('Within %', styles['Normal']), 
+                       Paragraph('Over %', styles['Normal']), 
+                       Paragraph('Under %', styles['Normal']), 
+                       Paragraph('Interruptions %', styles['Normal']), 
+                       Paragraph('Min V', styles['Normal']), 
+                       Paragraph('Max V', styles['Normal']), 
+                       Paragraph('Mean V', styles['Normal'])]]
+        
+        for feeder in feeders[:4]:  # Limit to 4 feeders for space
+            overall = feeder.get('overall', {})
+            feeder_data.append([
+                Paragraph(feeder.get('feeder_ref', 'N/A'), styles['Normal']),
+                Paragraph(f"{overall.get('within_pct', 0):.2f}", styles['Normal']),
+                Paragraph(f"{overall.get('over_pct', 0):.2f}", styles['Normal']),
+                Paragraph(f"{overall.get('under_pct', 0):.2f}", styles['Normal']),
+                Paragraph(f"{overall.get('interruption_pct', 0):.2f}", styles['Normal']),
+                Paragraph(f"{overall.get('min', 0):.1f}" if overall.get('min') else 'N/A', styles['Normal']),
+                Paragraph(f"{overall.get('max', 0):.1f}" if overall.get('max') else 'N/A', styles['Normal']),
+                Paragraph(f"{overall.get('mean', 0):.1f}" if overall.get('mean') else 'N/A', styles['Normal'])
+            ])
+        
+        feeder_table = Table(feeder_data, colWidths=[1.2*inch, 0.8*inch, 0.8*inch, 0.8*inch, 0.8*inch, 0.8*inch, 0.8*inch, 0.8*inch])
+        feeder_table.setStyle(TableStyle([
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 9),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black)
+        ]))
+        
+        story.append(feeder_table)
+        story.append(Spacer(1, 20))
+    
+    # Consumer Analysis Table (moved to be right after Feeder-wise Analysis)
+    story.append(Paragraph("Consumer-wise Analysis", subheading_style))
+    
+    consumers = report.get('consumers', [])
+    if consumers:
+        # Create header row with Paragraph objects for better text wrapping
+        consumer_data = [[Paragraph('Consumer', styles['Normal']), 
+                         Paragraph('Within %', styles['Normal']), 
+                         Paragraph('Over %', styles['Normal']), 
+                         Paragraph('Under %', styles['Normal']), 
+                         Paragraph('Min V', styles['Normal']), 
+                         Paragraph('Max V', styles['Normal']), 
+                         Paragraph('Avg Current (A)', styles['Normal']), 
+                         Paragraph('Avg PF', styles['Normal'])]]
+        
+        for consumer in consumers[:4]:  # Limit to 4 consumers for space
+            overall = consumer.get('overall', {})
+            consumer_data.append([
+                Paragraph(consumer.get('consumer_id', 'N/A'), styles['Normal']),
+                Paragraph(f"{overall.get('within_pct', 0):.2f}", styles['Normal']),
+                Paragraph(f"{overall.get('over_pct', 0):.2f}", styles['Normal']),
+                Paragraph(f"{overall.get('under_pct', 0):.2f}", styles['Normal']),
+                Paragraph(f"{overall.get('min', 0):.1f}" if overall.get('min') else 'N/A', styles['Normal']),
+                Paragraph(f"{overall.get('max', 0):.1f}" if overall.get('max') else 'N/A', styles['Normal']),
+                Paragraph(f"{consumer.get('average_current_a', 0):.2f}" if consumer.get('average_current_a') else 'N/A', styles['Normal']),
+                Paragraph(f"{consumer.get('average_power_factor', 0):.3f}" if consumer.get('average_power_factor') else 'N/A', styles['Normal'])
+            ])
+        
+        consumer_table = Table(consumer_data, colWidths=[1*inch, 0.8*inch, 0.8*inch, 0.8*inch, 0.8*inch, 0.8*inch, 1*inch, 0.8*inch])
+        consumer_table.setStyle(TableStyle([
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 9),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black)
+        ]))
+        
+        story.append(consumer_table)
+        story.append(Spacer(1, 20))
+    
+    # Voltage Profile Analysis section (moved to be the last section)
+    story.append(Paragraph("Voltage Profile Analysis", subheading_style))
+    
+    # Generate voltage chart if we have data
+    try:
+        # Try to create voltage chart from NMD data
+        nmd_df = pd.DataFrame(nmd_data['data'])
+        nmd_info = nmd_data.get('nmd_info', {})
+        voltage_columns = nmd_info.get('voltage_columns', [])
+        
+        if voltage_columns and len(nmd_df) > 0:
+            # Sample data for chart (take every 20th point to avoid overcrowding and fit on page)
+            sample_df = nmd_df.iloc[::20].copy()
+            
+            # Create time column if not exists
+            if 'time' not in sample_df.columns and 'DATE' in sample_df.columns and 'TIME' in sample_df.columns:
+                sample_df['time'] = pd.to_datetime(sample_df['DATE'] + ' ' + sample_df['TIME'], dayfirst=True)
+            
+            # Create voltage chart
+            voltage_fig = create_voltage_chart(sample_df, voltage_columns, "Voltage Profile Over Time")
+            voltage_buffer = save_chart_to_buffer(voltage_fig)
+            voltage_img = Image(voltage_buffer, width=7*inch, height=4*inch)
+            story.append(voltage_img)
+        else:
+            # Add a note if no voltage data available
+            story.append(Paragraph("Note: No voltage profile data available for analysis.", styles['Normal']))
+    
+    except Exception as e:
+        print(f"Error creating voltage chart: {str(e)}")
+        # Add a note if charts couldn't be generated
+        story.append(Paragraph("Note: Voltage profile chart could not be generated due to data format issues.", styles['Normal']))
+    
+    # Generate additional charts if we have data
+    try:
+        # Try to create current chart if available
+        nmd_df = pd.DataFrame(nmd_data['data'])
+        current_columns = []
+        for col in nmd_df.columns:
+            if 'CURRENT' in col.upper() and '(A)' in col:
+                current_columns.append(col)
+        
+        if current_columns and len(nmd_df) > 0:
+            sample_df = nmd_df.iloc[::20].copy()
+            if 'time' not in sample_df.columns and 'DATE' in sample_df.columns and 'TIME' in sample_df.columns:
+                sample_df['time'] = pd.to_datetime(sample_df['DATE'] + ' ' + sample_df['TIME'], dayfirst=True)
+            
+            story.append(Paragraph("Current Profile Analysis", subheading_style))
+            
+            # Create current chart
+            current_fig = create_current_chart(sample_df, current_columns, "Current Profile Over Time")
+            current_buffer = save_chart_to_buffer(current_fig)
+            current_img = Image(current_buffer, width=6*inch, height=3*inch)
+            story.append(current_img)
+            story.append(Spacer(1, 10))
+        
+        # Try to create power factor chart if available
+        pf_columns = []
+        for col in nmd_df.columns:
+            if 'POWER_FACTOR' in col.upper():
+                pf_columns.append(col)
+        
+        if pf_columns and len(nmd_df) > 0:
+            sample_df = nmd_df.iloc[::20].copy()
+            if 'time' not in sample_df.columns and 'DATE' in sample_df.columns and 'TIME' in sample_df.columns:
+                sample_df['time'] = pd.to_datetime(sample_df['DATE'] + ' ' + sample_df['TIME'], dayfirst=True)
+            
+            story.append(Paragraph("Power Factor Analysis", subheading_style))
+            
+            # Create power factor chart
+            pf_fig = create_power_factor_chart(sample_df, pf_columns, "Power Factor Over Time")
+            pf_buffer = save_chart_to_buffer(pf_fig)
+            pf_img = Image(pf_buffer, width=6*inch, height=3*inch)
+            story.append(pf_img)
+    
+    except Exception as e:
+        print(f"Error creating charts: {str(e)}")
+        # Add a note if charts couldn't be generated
+        story.append(Paragraph("Note: Additional charts could not be generated due to data format issues.", styles['Normal']))
+    
+    # Build PDF
+    doc.build(story)
+    buffer.seek(0)
+    return buffer
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)
