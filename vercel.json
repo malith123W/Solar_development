@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "name": "solar-development-frontend",
+  "name": "solar-development",
   "builds": [
     {
       "src": "frontend/package.json",
@@ -8,12 +8,16 @@
       "config": {
         "distDir": "build"
       }
+    },
+    {
+      "src": "backend/app.py",
+      "use": "@vercel/python"
     }
   ],
   "routes": [
     {
       "src": "/api/(.*)",
-      "dest": "https://solar-development-backend.onrender.com/api/$1"
+      "dest": "backend/app.py"
     },
     {
       "src": "/(.*)",
