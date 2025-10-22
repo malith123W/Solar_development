@@ -2,7 +2,6 @@ import React, { useState, useRef } from 'react';
 import Plot from 'react-plotly.js';
 import { 
   pqUploadFeederNmd, 
-  pqUploadConsumer, 
   pqGenerateReport, 
   pqDownloadReport, 
   pqDownloadPdf,
@@ -16,10 +15,7 @@ import VoltageVariation from './VoltageVariation';
 const PowerQuality = () => {
   const [sessionId] = useState(`pq_session_${Date.now()}`);
   const [feederFile, setFeederFile] = useState(null);
-  const [consumerFiles, setConsumerFiles] = useState([]);
-  const [feederWiseConsumerFiles, setFeederWiseConsumerFiles] = useState({});
   const [isUploadingFeeder, setIsUploadingFeeder] = useState(false);
-  const [isUploadingConsumer, setIsUploadingConsumer] = useState(false);
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
   const [error, setError] = useState(null);
@@ -39,7 +35,6 @@ const PowerQuality = () => {
   const [isUploadingLoad, setIsUploadingLoad] = useState(false);
   
   const feederInputRef = useRef(null);
-  const consumerInputRef = useRef(null);
   const transformerLoadInputRef = useRef(null);
 
   const handleFeederUpload = async (event) => {
@@ -70,39 +65,7 @@ const PowerQuality = () => {
     }
   };
 
-  const handleConsumerUpload = async (event) => {
-    const files = Array.from(event.target.files);
-    if (files.length === 0) return;
-
-    const invalidFiles = files.filter(file => !file.name.endsWith('.csv'));
-    if (invalidFiles.length > 0) {
-      setError('Please upload only CSV files');
-      return;
-    }
-
-    setIsUploadingConsumer(true);
-    setError(null);
-    setSuccess(null);
-
-    try {
-      const uploadPromises = files.map((file, index) => 
-        pqUploadConsumer(
-          file, 
-          sessionId, 
-          file.name.replace('.csv', ''), 
-'FEEDER_001'
-        )
-      );
-
-      await Promise.all(uploadPromises);
-      setConsumerFiles(prev => [...prev, ...files]);
-      setSuccess(`${files.length} consumer file(s) uploaded successfully!`);
-    } catch (error) {
-      setError(error.response?.data?.error || 'Failed to upload consumer files');
-    } finally {
-      setIsUploadingConsumer(false);
-    }
-  };
+  // Removed unused handleConsumerUpload function
 
   const handleGenerateReport = async () => {
     if (!feederFile) {
@@ -246,16 +209,9 @@ const PowerQuality = () => {
     }
   };
 
-  const removeConsumerFile = (index) => {
-    setConsumerFiles(prev => prev.filter((_, i) => i !== index));
-  };
+  // Removed unused removeConsumerFile function
 
-  const handleFeederWiseConsumerUpload = (feederName, files) => {
-    setFeederWiseConsumerFiles(prev => ({
-      ...prev,
-      [feederName]: [...(prev[feederName] || []), ...files]
-    }));
-  };
+  // Removed unused handleFeederWiseConsumerUpload function
 
 
   // Transformer Load Analysis Handlers
@@ -411,7 +367,7 @@ const PowerQuality = () => {
           <FeederWiseUpload 
             sessionId={sessionId}
             availableFeeders={availableFeeders}
-            onConsumerUpload={handleFeederWiseConsumerUpload}
+            // Removed unused onConsumerUpload prop
           />
         </div>
 
