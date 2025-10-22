@@ -1,0 +1,209 @@
+// GridLAB-D Model
+// Generated: 2025-10-15 10:36:47
+// Purpose: Smart Load Balancing and Forecasting Analysis
+
+
+clock {
+    timezone UTC0;
+    starttime '2025-10-15 10:36:47';
+    stoptime '2025-10-16 10:36:47';
+}
+
+module powerflow {
+    solver_method NR;
+    NR_iteration_limit 50;
+};
+
+module tape;
+
+module residential {
+    implicit_enduses NONE;
+};
+
+object transformer_configuration {
+    name transformer_config_T1;
+    connect_type WYE_WYE;
+    install_type PADMOUNT;
+    power_rating 5000;  // kVA
+    primary_voltage 11000;  // V
+    secondary_voltage 400;  // V
+    resistance 0.01;
+    reactance 0.06;
+};
+
+object transformer {
+    name T1;
+    phases ABCN;
+    from source_node;
+    to T1_secondary;
+    configuration transformer_config_T1;
+};
+
+object node {
+    name source_node;
+    phases ABCN;
+    bustype SWING;
+    voltage_A 6350.85+0j;  // 11kV / sqrt(3)
+    voltage_B -3175.42-5500j;
+    voltage_C -3175.42+5500j;
+    nominal_voltage 6350.85;
+};
+
+object node {
+    name T1_secondary;
+    phases ABCN;
+    voltage_A 230.94+0j;  // 400V / sqrt(3)
+    voltage_B -115.47-200j;
+    voltage_C -115.47+200j;
+    nominal_voltage 230.94;
+};
+
+object node {
+    name F1;
+    phases ABCN;
+    voltage_A 230.94+0j;
+    voltage_B -115.47-200j;
+    voltage_C -115.47+200j;
+    nominal_voltage 230.94;
+};
+
+object line_configuration {
+    name line_config_T1_to_F1;
+    conductor_A overhead_line_conductor;
+    conductor_B overhead_line_conductor;
+    conductor_C overhead_line_conductor;
+    conductor_N overhead_line_conductor;
+    spacing line_spacing_500;
+};
+
+object line_spacing {
+    name line_spacing_500;
+    distance_AB 1.0 m;
+    distance_BC 1.0 m;
+    distance_AC 2.0 m;
+    distance_AN 1.5 m;
+    distance_BN 1.5 m;
+    distance_CN 1.5 m;
+};
+
+object overhead_line_conductor {
+    name overhead_line_conductor;
+    geometric_mean_radius 0.00446 m;
+    resistance 0.592 Ohm/km;
+};
+
+object overhead_line {
+    name T1_to_F1;
+    phases ABCN;
+    from T1_secondary;
+    to F1;
+    length 500 m;
+    configuration line_config_T1_to_F1;
+};
+
+object node {
+    name F1_A;
+    phases AN;
+    voltage_A 230.94+0j;
+    nominal_voltage 230.94;
+};
+
+object underground_line_conductor {
+    name ugc_A_F1_to_F1_A;
+    outer_diameter 0.025 m;
+    conductor_gmr 0.00446 m;
+    conductor_diameter 0.015 m;
+    conductor_resistance 0.769 Ohm/km;
+    neutral_gmr 0.00446 m;
+    neutral_resistance 0.769 Ohm/km;
+    neutral_diameter 0.015 m;
+    neutral_strands 13;
+};
+
+object line_spacing {
+    name spacing_F1_to_F1_A;
+    distance_AN 0.5 m;
+};
+
+object line_configuration {
+    name config_F1_to_F1_A;
+    conductor_A ugc_A_F1_to_F1_A;
+    conductor_N ugc_A_F1_to_F1_A;
+    spacing spacing_F1_to_F1_A;
+};
+
+object underground_line {
+    name F1_to_F1_A;
+    phases AN;
+    from F1;
+    to F1_A;
+    length 200 m;
+    configuration config_F1_to_F1_A;
+};
+
+object node {
+    name pole_C1;
+    parent F1_A;
+    phases AN;
+    voltage_A 230.94+0j;
+    nominal_voltage 230.94;
+};
+
+object triplex_line_conductor {
+    name tlc_service_C1;
+    resistance 0.97 Ohm/km;
+    geometric_mean_radius 0.01111 m;
+};
+
+object triplex_line_configuration {
+    name tlc_config_service_C1;
+    conductor_1 tlc_service_C1;
+    conductor_2 tlc_service_C1;
+    conductor_N tlc_service_C1;
+    insulation_thickness 0.08 in;
+    diameter 0.368 in;
+};
+
+object triplex_line {
+    name service_C1;
+    phases AS;
+    from pole_C1;
+    to meter_C1;
+    length 30 m;
+    configuration tlc_config_service_C1;
+};
+
+object triplex_meter {
+    name meter_C1;
+    phases AS;
+    nominal_voltage 230.0;
+};
+
+object triplex_load {
+    name load_C1;
+    parent meter_C1;
+    phases AS;
+    constant_power_A 5166.666666666667+1000.0j;  // W
+    nominal_voltage 230.0;
+};
+
+object recorder {
+    parent T1;
+    property power_in_A,power_in_B,power_in_C;
+    interval 3600;
+    file transformer_power.csv;
+};
+
+object group_recorder {
+    group "class=triplex_meter";
+    property voltage_1,voltage_2,voltage_N;
+    interval 3600;
+    file meter_voltages.csv;
+};
+
+object group_recorder {
+    group "class=triplex_load";
+    property constant_power_A,constant_power_B,constant_power_C;
+    interval 3600;
+    file load_powers.csv;
+};
