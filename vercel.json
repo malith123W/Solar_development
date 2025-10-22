@@ -1,14 +1,27 @@
 {
   "version": 2,
-  "name": "solar-development-frontend",
-  "framework": "create-react-app",
-  "installCommand": "cd frontend && npm ci",
-  "buildCommand": "cd frontend && npm run build",
-  "outputDirectory": "frontend/build",
-  "rewrites": [
+  "name": "solar-development",
+  "builds": [
     {
-      "source": "/api/(.*)",
-      "destination": "https://YOUR-BACKEND-HOST/api/$1"
+      "src": "frontend/package.json",
+      "use": "@vercel/static-build",
+      "config": {
+        "distDir": "build"
+      }
+    },
+    {
+      "src": "backend/app.py",
+      "use": "@vercel/python"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/api/(.*)",
+      "dest": "backend/app.py"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "frontend/build/$1"
     }
   ]
 }
