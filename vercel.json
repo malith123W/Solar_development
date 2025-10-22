@@ -2,10 +2,9 @@
   "version": 2,
   "name": "solar-development-frontend",
   "framework": "create-react-app",
-  "rootDirectory": "frontend",
-  "installCommand": "npm ci",
-  "buildCommand": "npm run build",
-  "outputDirectory": "build",
+  "installCommand": "cd frontend && npm ci",
+  "buildCommand": "cd frontend && npm run build",
+  "outputDirectory": "frontend/build",
   "rewrites": [
     {
       "source": "/api/(.*)",
