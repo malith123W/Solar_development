@@ -4,7 +4,7 @@ from typing import Dict, List, Optional, Tuple, Any
 from flask import jsonify
 from utils import session_data
 from scipy.stats import pearsonr
-from sklearn.metrics import mean_squared_error
+# Removed sklearn dependency - using numpy for MSE calculation
 import os
 from datetime import datetime, timedelta
 from werkzeug.utils import secure_filename
@@ -420,9 +420,10 @@ class NMDAnalysisProcessor:
             except:
                 correlation = 0
             
-            # Calculate RMSE
+            # Calculate RMSE using numpy
             try:
-                rmse = np.sqrt(mean_squared_error(customer_voltage, feeder_voltage))
+                mse = np.mean((customer_voltage - feeder_voltage) ** 2)
+                rmse = np.sqrt(mse)
             except:
                 rmse = float('inf')
             
@@ -492,9 +493,10 @@ class NMDAnalysisProcessor:
                     except:
                         correlation = 0
                     
-                    # Calculate RMSE
+                    # Calculate RMSE using numpy
                     try:
-                        rmse = np.sqrt(mean_squared_error(customer_voltage, feeder_voltage))
+                        mse = np.mean((customer_voltage - feeder_voltage) ** 2)
+                        rmse = np.sqrt(mse)
                     except:
                         rmse = float('inf')
                     

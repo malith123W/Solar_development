@@ -284,7 +284,7 @@ class LoadForecaster:
         try:
             import tensorflow as tf
             from tensorflow import keras
-            from sklearn.preprocessing import MinMaxScaler
+            # Removed sklearn dependency - using manual scaling
         except ImportError:
             return {
                 'success': False,
