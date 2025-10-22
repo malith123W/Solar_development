@@ -2,7 +2,7 @@ import React, { useState, useRef } from 'react';
 import { 
   pqUploadConsumer
 } from '../services/api';
-import { LECO_FEEDER_NAMES, getFeederNamesFromNMD } from '../utils/feederNames';
+// Removed unused imports
 
 const FeederWiseUpload = ({ sessionId, availableFeeders, onConsumerUpload }) => {
   const [activeTab, setActiveTab] = useState(0);

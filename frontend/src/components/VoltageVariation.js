@@ -1,16 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import Plot from 'react-plotly.js';
 
 const VoltageVariation = ({ voltageData, width = 1200, height = 800 }) => {
   const [selectedGraph, setSelectedGraph] = useState('overview');
-  const [selectedFeeders, setSelectedFeeders] = useState([]);
-
-  useEffect(() => {
-    if (voltageData && voltageData.analysis && voltageData.analysis.feeder_analysis) {
-      const feeders = Object.keys(voltageData.analysis.feeder_analysis);
-      setSelectedFeeders(feeders);
-    }
-  }, [voltageData]);
+  // Removed unused selectedFeeders state and useEffect
 
   if (!voltageData || !voltageData.analysis) {
     return (
@@ -21,7 +14,7 @@ const VoltageVariation = ({ voltageData, width = 1200, height = 800 }) => {
   }
 
   const { analysis, graphs, profile, report } = voltageData;
-  const { feeder_analysis, overall_stats, voltage_limits } = analysis;
+  const { feeder_analysis, voltage_limits } = analysis;
 
   const renderOverviewGraph = () => {
     if (!graphs || !graphs.graph_data) {

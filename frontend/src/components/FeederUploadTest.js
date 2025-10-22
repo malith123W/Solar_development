@@ -7,9 +7,7 @@ const FeederUploadTest = () => {
     '0700082108', '0700188511', '0700759004', '0701114909', '0701369108'
   ]);
 
-  const handleConsumerUpload = (feederName, files) => {
-    console.log(`Uploaded ${files.length} files for feeder ${feederName}:`, files);
-  };
+  // Removed unused handleConsumerUpload function
 
   return (
     <div style={{ padding: '2rem', maxWidth: '1200px', margin: '0 auto' }}>
@@ -19,7 +17,6 @@ const FeederUploadTest = () => {
       <FeederWiseUpload 
         sessionId={sessionId}
         availableFeeders={availableFeeders}
-        onConsumerUpload={handleConsumerUpload}
       />
     </div>
   );
