@@ -1,0 +1,15 @@
+{
+  "version": 2,
+  "name": "solar-development-frontend",
+  "framework": "create-react-app",
+  "rootDirectory": "frontend",
+  "installCommand": "npm ci",
+  "buildCommand": "npm run build",
+  "outputDirectory": "build",
+  "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "destination": "https://YOUR-BACKEND-HOST/api/$1"
+    }
+  ]
+}
