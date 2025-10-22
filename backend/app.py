@@ -408,18 +408,14 @@ def pq_generate_report():
         nmd_info = nmd_blob['nmd_info']
         feeder_id_col = nmd_blob['feeder_id_col']
         
-        # Filter feeders to only include those with consumer data uploaded
+        # Get consumer data for analysis
         consumers_data = pq_state.get('consumers', {})
-        feeders_with_consumers = set()
-        if consumers_data:
-            for consumer_id, consumer_info in consumers_data.items():
-                if isinstance(consumer_info, dict) and 'feeder' in consumer_info:
-                    feeders_with_consumers.add(str(consumer_info['feeder']))
         
-        # Only use feeders that have consumer data uploaded
-        available_feeders = [feeder for feeder in feeders_to_use if feeder in feeders_with_consumers] if feeders_to_use else []
+        # Include all selected feeders for analysis, regardless of consumer data availability
+        # This allows feeder-wise analysis even without consumer data
+        available_feeders = feeders_to_use if feeders_to_use else []
         
-        # Build PQ report (only for feeders with consumer data)
+        # Build PQ report (includes all selected feeders, with or without consumer data)
         report = _build_pq_report(
             nmd_df=nmd_df,
             nmd_info=nmd_info,
@@ -1883,6 +1879,26 @@ def _build_pq_report(nmd_df, nmd_info, feeder_id_col, feeders_to_use, consumers_
     # Overall summary
     overall_analysis = analyze_voltage_quality(pd.Series(all_voltages)) if all_voltages else None
     
+    # Calculate overall transformer metrics from all voltage data
+    total_voltage_count = len(all_voltages)
+    if total_voltage_count > 0 and overall_analysis:
+        # Calculate weighted averages for transformer-level metrics
+        transformer_within_pct = overall_analysis['standard']['within']
+        transformer_over_pct = overall_analysis['standard']['over']
+        transformer_under_pct = overall_analysis['standard']['under']
+        transformer_interruption_pct = overall_analysis['standard']['interruptions']
+        transformer_within_strict_pct = overall_analysis['strict']['within']
+        transformer_over_strict_pct = overall_analysis['strict']['over']
+        transformer_under_strict_pct = overall_analysis['strict']['under']
+    else:
+        transformer_within_pct = 0
+        transformer_over_pct = 0
+        transformer_under_pct = 0
+        transformer_interruption_pct = 0
+        transformer_within_strict_pct = 0
+        transformer_over_strict_pct = 0
+        transformer_under_strict_pct = 0
+
     report = {
         'title': 'Voltage Quality Report',
         'summary': {
@@ -1895,14 +1911,29 @@ def _build_pq_report(nmd_df, nmd_info, feeder_id_col, feeders_to_use, consumers_
             'total_consumers': len(consumers_blob),
             'overall_analysis': overall_analysis
         },
+        'transformer': {
+            'overall_within_pct': transformer_within_pct,
+            'overall_over_pct': transformer_over_pct,
+            'overall_under_pct': transformer_under_pct,
+            'overall_interruption_pct': transformer_interruption_pct,
+            'overall_within_strict_pct': transformer_within_strict_pct,
+            'overall_over_strict_pct': transformer_over_strict_pct,
+            'overall_under_strict_pct': transformer_under_strict_pct,
+            'maintained': transformer_within_pct >= 95.0,
+            'maintained_strict': transformer_within_strict_pct >= 95.0,
+            'time_range': {
+                'min_date': nmd_df['time'].min().strftime('%Y-%m-%d'),
+                'max_date': nmd_df['time'].max().strftime('%Y-%m-%d')
+            }
+        },
         'voltage_analysis': {
             'voltage_columns': overall_voltage_columns,
             'over_voltage_limit': 253,
             'under_voltage_limit': 207,
             'nominal_voltage': 230
         },
-        'feeders': {},
-        'consumers': {}
+        'feeders': [],
+        'consumers': []
     }
     
     # Analyze each feeder
@@ -1941,7 +1972,19 @@ def _build_pq_report(nmd_df, nmd_info, feeder_id_col, feeders_to_use, consumers_
             pf_data = pd.to_numeric(feeder_data[pf_cols[0]], errors='coerce')
             avg_pf = round(float(pf_data.mean()), 3) if not pf_data.empty else 0
         
-        report['feeders'][feeder] = {
+        # Create feeder entry with structure expected by PDF generation
+        feeder_entry = {
+            'feeder_ref': feeder,
+            'overall': {
+                'within_pct': feeder_analysis['standard']['within'] if feeder_analysis else 0,
+                'over_pct': feeder_analysis['standard']['over'] if feeder_analysis else 0,
+                'under_pct': feeder_analysis['standard']['under'] if feeder_analysis else 0,
+                'interruption_pct': feeder_analysis['standard']['interruptions'] if feeder_analysis else 0,
+                'min': feeder_analysis['stats']['min'] if feeder_analysis else 0,
+                'max': feeder_analysis['stats']['max'] if feeder_analysis else 0,
+                'mean': feeder_analysis['stats']['mean'] if feeder_analysis else 0,
+                'count': len(feeder_voltages) if feeder_voltages else 0
+            },
             'voltage_quality': feeder_analysis,
             'voltage_columns': feeder_voltage_columns,
             'record_count': len(feeder_data),
@@ -1949,6 +1992,8 @@ def _build_pq_report(nmd_df, nmd_info, feeder_id_col, feeders_to_use, consumers_
             'avg_current': avg_current,
             'avg_pf': avg_pf
         }
+        
+        report['feeders'].append(feeder_entry)
     
     # Analyze consumers if available
     for consumer_id, consumer_data in consumers_blob.items():
@@ -1987,13 +2032,25 @@ def _build_pq_report(nmd_df, nmd_info, feeder_id_col, feeders_to_use, consumers_
             elif feeder_id_col in consumer_df.columns:
                 associated_feeder = consumer_df[feeder_id_col].iloc[0] if len(consumer_df) > 0 else "Unknown"
             
-            report['consumers'][consumer_id] = {
+            # Create consumer entry with structure expected by PDF generation
+            consumer_entry = {
+                'consumer_id': consumer_id,
+                'overall': {
+                    'within_pct': consumer_analysis['standard']['within'] if consumer_analysis else 0,
+                    'over_pct': consumer_analysis['standard']['over'] if consumer_analysis else 0,
+                    'under_pct': consumer_analysis['standard']['under'] if consumer_analysis else 0,
+                    'min': consumer_analysis['stats']['min'] if consumer_analysis else 0,
+                    'max': consumer_analysis['stats']['max'] if consumer_analysis else 0,
+                    'mean': consumer_analysis['stats']['mean'] if consumer_analysis else 0
+                },
                 'voltage_quality': consumer_analysis,
                 'associated_feeder': associated_feeder,
                 'record_count': len(consumer_df),
-                'avg_current': avg_current,
-                'avg_pf': avg_pf
+                'average_current_a': avg_current,
+                'average_power_factor': avg_pf
             }
+            
+            report['consumers'].append(consumer_entry)
     
     return report
 
@@ -2398,11 +2455,12 @@ def generate_power_quality_pdf(report, nmd_data, consumers_data, transformer_num
     if report['feeders']:
         story.append(Paragraph("Feeder-wise Analysis", styles['Heading2']))
         
-        for feeder_name, feeder_data in report['feeders'].items():
+        for feeder in report['feeders']:
+            feeder_name = feeder.get('feeder_ref', 'Unknown')
             story.append(Paragraph(f"Feeder: {feeder_name}", styles['Heading3']))
             
-            if feeder_data['voltage_quality']:
-                vq = feeder_data['voltage_quality']
+            if feeder.get('voltage_quality'):
+                vq = feeder['voltage_quality']
                 feeder_table_data = [
                     ['Metric', 'Value'],
                     ['Standard Within', f"{vq['standard']['within']}%"],
@@ -2425,46 +2483,46 @@ def generate_power_quality_pdf(report, nmd_data, consumers_data, transformer_num
                 story.append(feeder_table)
                 story.append(Spacer(1, 12))
                 
-                # Add Voltage vs Load Correlation Graph for each feeder
+                # Add Feeder-wise Voltage Variation Graphs
                 try:
-                    # Check if we have voltage and load data for this feeder
-                    if 'voltage_data' in feeder_data and 'load_data' in feeder_data:
-                        fig, ax = plt.subplots(figsize=(10, 5))
+                    # Create voltage variation graphs for this feeder
+                    if 'voltage_columns' in feeder and feeder['voltage_columns']:
+                        # Create combined voltage profile for all phases
+                        fig, ax = plt.subplots(figsize=(12, 6))
                         
-                        voltage_data = feeder_data['voltage_data']
-                        load_data = feeder_data['load_data']
+                        # Get voltage data for all phases
+                        voltage_columns = feeder['voltage_columns']
+                        phase_colors = ['#8E44AD', '#3498DB', '#27AE60']  # Purple, Blue, Green
+                        phase_labels = ['Phase A', 'Phase B', 'Phase C']
                         
-                        # Get voltage limits
-                        over_limit = 253  # Standard over-voltage limit
-                        under_limit = 207  # Standard under-voltage limit
+                        for i, (phase_col, phase_data) in enumerate(voltage_columns.items()):
+                            if 'raw_data' in phase_data and phase_data['raw_data']:
+                                # Sample data to avoid overcrowding (every 10th point)
+                                sample_data = phase_data['raw_data'][::10]
+                                time_index = list(range(len(sample_data)))
+                                
+                                # Plot voltage over time
+                                ax.plot(time_index, sample_data, 
+                                       color=phase_colors[i % len(phase_colors)], 
+                                       label=phase_labels[i % len(phase_labels)], 
+                                       linewidth=1.5, 
+                                       alpha=0.8)
                         
-                        # Color code points based on voltage limits
-                        colors_list = []
-                        for v in voltage_data:
-                            if v > over_limit:
-                                colors_list.append('#f44336')  # Red
-                            elif v < under_limit:
-                                colors_list.append('#ff9800')  # Orange
-                            else:
-                                colors_list.append('#4caf50')  # Green
+                        # Add voltage limits
+                        over_limit = 253
+                        under_limit = 207
+                        nominal_voltage = 230
                         
-                        # Scatter plot
-                        ax.scatter(load_data, voltage_data, c=colors_list, alpha=0.6, s=20)
+                        ax.axhline(y=over_limit, color='red', linestyle='--', alpha=0.8, label=f'Over Voltage Limit ({over_limit}V)')
+                        ax.axhline(y=under_limit, color='orange', linestyle='--', alpha=0.8, label=f'Under Voltage Limit ({under_limit}V)')
+                        ax.axhline(y=nominal_voltage, color='gray', linestyle=':', alpha=0.6, label=f'Nominal ({nominal_voltage}V)')
                         
                         # Formatting
-                        ax.set_xlabel('Feeder Load (kW)', fontsize=10)
+                        ax.set_xlabel('Time Index', fontsize=10)
                         ax.set_ylabel('Voltage (V)', fontsize=10)
-                        ax.set_title(f'Voltage vs Load Correlation - {feeder_name}', fontsize=12, fontweight='bold')
+                        ax.set_title(f'Voltage Profile - {feeder_name}', fontsize=12, fontweight='bold')
+                        ax.legend(fontsize=8)
                         ax.grid(True, alpha=0.3)
-                        
-                        # Add legend
-                        from matplotlib.patches import Patch
-                        legend_elements = [
-                            Patch(facecolor='#4caf50', label='Normal'),
-                            Patch(facecolor='#ff9800', label='Under-voltage'),
-                            Patch(facecolor='#f44336', label='Over-voltage')
-                        ]
-                        ax.legend(handles=legend_elements, loc='best', fontsize=8)
                         
                         plt.tight_layout()
                         
@@ -2480,20 +2538,21 @@ def generate_power_quality_pdf(report, nmd_data, consumers_data, transformer_num
                         story.append(Spacer(1, 15))
                         
                 except Exception as e:
-                    print(f"Error creating feeder voltage correlation graph for {feeder_name}: {str(e)}")
+                    print(f"Error creating feeder voltage profile graph for {feeder_name}: {str(e)}")
                 
-                # Add Voltage Profile Over Time - Three Separate Phase Graphs for each feeder
+                # Add Individual Phase Analysis for this feeder
                 try:
-                    if 'voltage_columns' in feeder_data and feeder_data['voltage_columns']:
-                        voltage_columns = feeder_data['voltage_columns']
+                    if 'voltage_columns' in feeder and feeder['voltage_columns']:
+                        voltage_columns = feeder['voltage_columns']
                         
                         # Get voltage limits
                         over_limit = 253
                         under_limit = 207
                         nominal_voltage = 230
                         
-                        # Create separate graphs for each phase if available
+                        # Create separate graphs for each phase
                         phase_colors = ['#8E44AD', '#3498DB', '#27AE60']  # Purple, Blue, Green
+                        phase_labels = ['Phase A', 'Phase B', 'Phase C']
                         
                         for i, (v_col, v_data) in enumerate(list(voltage_columns.items())[:3]):
                             if 'raw_data' in v_data and v_data['raw_data']:
@@ -2546,19 +2605,20 @@ def generate_power_quality_pdf(report, nmd_data, consumers_data, transformer_num
         story.append(PageBreak())
         story.append(Paragraph("Consumer-wise Analysis", styles['Heading2']))
         
-        for consumer_id, consumer_data in report['consumers'].items():
+        for consumer in report['consumers']:
+            consumer_id = consumer.get('consumer_id', 'Unknown')
             story.append(Paragraph(f"Consumer: {consumer_id}", styles['Heading3']))
             
-            if consumer_data['voltage_quality']:
-                vq = consumer_data['voltage_quality']
+            if consumer.get('voltage_quality'):
+                vq = consumer['voltage_quality']
                 consumer_table_data = [
                     ['Metric', 'Value'],
-                    ['Associated Feeder', consumer_data['associated_feeder']],
+                    ['Associated Feeder', consumer.get('associated_feeder', 'Unknown')],
                     ['Standard Within', f"{vq['standard']['within']}%"],
                     ['Standard Over', f"{vq['standard']['over']}%"],
                     ['Standard Under', f"{vq['standard']['under']}%"],
-                    ['Avg Current', f"{consumer_data['avg_current']} A"],
-                    ['Avg Power Factor', f"{consumer_data['avg_pf']}"]
+                    ['Avg Current', f"{consumer.get('average_current_a', 0)} A"],
+                    ['Avg Power Factor', f"{consumer.get('average_power_factor', 0)}"]
                 ]
                 
                 consumer_table = Table(consumer_table_data, colWidths=[2*inch, 2*inch])
@@ -2571,6 +2631,140 @@ def generate_power_quality_pdf(report, nmd_data, consumers_data, transformer_num
                 
                 story.append(consumer_table)
                 story.append(Spacer(1, 12))
+    
+    # Voltage Variation Analysis Section
+    if 'voltage_variation' in report and report['voltage_variation']:
+        story.append(PageBreak())
+        story.append(Paragraph("Voltage Variation Analysis", styles['Heading2']))
+        
+        voltage_variation = report['voltage_variation']
+        analysis = voltage_variation.get('analysis', {})
+        
+        if analysis:
+            # Overall voltage variation summary
+            story.append(Paragraph("Overall Voltage Variation Summary", styles['Heading3']))
+            
+            overall_stats = analysis.get('overall_stats', {})
+            voltage_limits = analysis.get('voltage_limits', {})
+            
+            summary_data = [
+                ['Parameter', 'Value'],
+                ['Transformer Voltage', f"{analysis.get('transformer_voltage', 230)} V"],
+                ['Min Acceptable Voltage', f"{voltage_limits.get('min', 207)} V"],
+                ['Max Acceptable Voltage', f"{voltage_limits.get('max', 253)} V"],
+                ['Best Performing Feeder', overall_stats.get('best_feeder', 'N/A')],
+                ['Worst Performing Feeder', overall_stats.get('worst_feeder', 'N/A')],
+                ['Average Voltage Drop', f"{overall_stats.get('avg_voltage_drop', 0):.2f} V"],
+                ['Total Feeders Analyzed', str(overall_stats.get('total_feeders', 0))]
+            ]
+            
+            summary_table = Table(summary_data, colWidths=[2.5*inch, 2*inch])
+            summary_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.lightblue),
+                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('GRID', (0, 0), (-1, -1), 1, colors.black)
+            ]))
+            
+            story.append(summary_table)
+            story.append(Spacer(1, 20))
+            
+            # Feeder-wise voltage variation analysis
+            feeder_analysis = analysis.get('feeder_analysis', {})
+            if feeder_analysis:
+                story.append(Paragraph("Feeder-wise Voltage Variation Analysis", styles['Heading3']))
+                
+                # Create feeder comparison table
+                feeder_data = []
+                feeder_data.append([
+                    Paragraph('Feeder', styles['Normal']),
+                    Paragraph('Avg Voltage Drop (V)', styles['Normal']),
+                    Paragraph('Voltage Variation (%)', styles['Normal']),
+                    Paragraph('Total Readings', styles['Normal']),
+                    Paragraph('Performance', styles['Normal'])
+                ])
+                
+                for feeder_name, feeder_stats in feeder_analysis.items():
+                    avg_drop = feeder_stats.get('overall_voltage_drop_mean', 0)
+                    variation = feeder_stats.get('overall_voltage_variation', 0)
+                    readings = feeder_stats.get('total_readings', 0)
+                    
+                    # Determine performance level
+                    if avg_drop < 5:
+                        performance = "Excellent"
+                    elif avg_drop < 10:
+                        performance = "Good"
+                    elif avg_drop < 15:
+                        performance = "Fair"
+                    else:
+                        performance = "Poor"
+                    
+                    feeder_data.append([
+                        Paragraph(feeder_name, styles['Normal']),
+                        Paragraph(f"{avg_drop:.2f}", styles['Normal']),
+                        Paragraph(f"{variation:.2f}", styles['Normal']),
+                        Paragraph(str(readings), styles['Normal']),
+                        Paragraph(performance, styles['Normal'])
+                    ])
+                
+                feeder_table = Table(feeder_data, colWidths=[1.5*inch, 1.2*inch, 1.2*inch, 1*inch, 1*inch])
+                feeder_table.setStyle(TableStyle([
+                    ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                    ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                    ('FONTSIZE', (0, 0), (-1, -1), 9),
+                    ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                    ('GRID', (0, 0), (-1, -1), 1, colors.black)
+                ]))
+                
+                story.append(feeder_table)
+                story.append(Spacer(1, 20))
+                
+                # Add Voltage Variation Graphs
+                try:
+                    # Create voltage variation visualization graphs
+                    voltage_graphs = voltage_variation.get('graphs', {})
+                    if voltage_graphs and 'error' not in voltage_graphs:
+                        story.append(Paragraph("Voltage Variation Visualization", styles['Heading3']))
+                        
+                        # Create Feeder Performance Comparison graph only
+                        fig, ax = plt.subplots(1, 1, figsize=(10, 6))
+                        
+                        # Prepare data for visualization
+                        feeders = list(feeder_analysis.keys())
+                        voltage_drops = [feeder_analysis[f]['overall_voltage_drop_mean'] for f in feeders]
+                        voltage_variations = [feeder_analysis[f]['overall_voltage_variation'] for f in feeders]
+                        reading_counts = [feeder_analysis[f]['total_readings'] for f in feeders]
+                        
+                        # Feeder Performance Comparison (Scatter Plot)
+                        ax.scatter(reading_counts, voltage_drops, s=100, alpha=0.7, c=voltage_variations, cmap='RdYlGn')
+                        for i, feeder in enumerate(feeders):
+                            ax.annotate(feeder, (reading_counts[i], voltage_drops[i]), 
+                                       xytext=(5, 5), textcoords='offset points', fontsize=8)
+                        ax.set_title('Feeder Performance Comparison', fontweight='bold')
+                        ax.set_xlabel('Total Readings')
+                        ax.set_ylabel('Voltage Drop (V)')
+                        ax.grid(True, alpha=0.3)
+                        
+                        plt.tight_layout()
+                        
+                        # Save to buffer
+                        img_buffer = io.BytesIO()
+                        plt.savefig(img_buffer, format='png', dpi=150, bbox_inches='tight')
+                        img_buffer.seek(0)
+                        plt.close()
+                        
+                        # Add to PDF
+                        img = Image(img_buffer, width=7*inch, height=4.5*inch)
+                        story.append(img)
+                        story.append(Spacer(1, 20))
+                        
+                except Exception as e:
+                    print(f"Error creating voltage variation graphs: {str(e)}")
+                    # Add a note if graphs couldn't be generated
+                    story.append(Paragraph("Note: Voltage variation graphs could not be generated due to data format issues.", styles['Normal']))
+                
+                # Add Voltage Variation Recommendations
     
     # Transformer Load Analysis
     if 'transformer_load_analysis' in report:

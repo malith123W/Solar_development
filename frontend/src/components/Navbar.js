@@ -8,9 +8,7 @@ const Navbar = () => {
   const menuItems = [
     { label: 'Dashboard', path: '/dashboard', icon: '📊' },
     { label: 'NMD Analysis', path: '/nmd', icon: '📈' },
-    { label: 'NMD Analysis (New)', path: '/nmd-analysis', icon: '🔬' },
     { label: 'Power Quality', path: '/power-quality', icon: '⚡' },
-    { label: 'Smart Grid', path: '/smart-grid', icon: '🏗️' },
   ];
 
   return (

@@ -7,8 +7,7 @@ import Navbar from './components/Navbar';
 import Dashboard from './components/Dashboard';
 import NMDAnalysis from './components/NMDAnalysis';
 import PowerQuality from './components/PowerQuality';
-import NMDAnalysisNew from './components/NMDAnalysisNew';
-import SmartGrid from './components/SmartGrid';
+// Removed NMDAnalysisNew and SmartGrid
 
 function App() {
   return (
@@ -20,9 +19,7 @@ function App() {
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/nmd" element={<NMDAnalysis />} />
-            <Route path="/nmd-analysis" element={<NMDAnalysisNew />} />
             <Route path="/power-quality" element={<PowerQuality />} />
-            <Route path="/smart-grid" element={<SmartGrid />} />
           </Routes>
         </main>
       </div>
