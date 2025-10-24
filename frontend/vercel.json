@@ -1,5 +1,6 @@
 {
   "version": 2,
+  "name": "solar-development-frontend",
   "builds": [
     {
       "src": "package.json",
@@ -11,8 +12,12 @@
   ],
   "routes": [
     {
+      "src": "/static/(.*)",
+      "dest": "/static/$1"
+    },
+    {
       "src": "/(.*)",
-      "dest": "/$1"
+      "dest": "/index.html"
     }
   ],
   "env": {
