@@ -10,3 +10,7 @@ export const APP_CONFIG = {
   SUPPORTED_FILE_TYPES: ['.csv'],
   DEFAULT_SESSION_PREFIX: 'session_',
 };
+
+// Environment detection
+export const isProduction = process.env.NODE_ENV === 'production';
+export const isDevelopment = process.env.NODE_ENV === 'development';
